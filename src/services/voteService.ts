@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '../config/supabaseAdmin';
+import { supabaseAdmin } from "../config/supabaseAdmin";
 
 interface JoinParams {
   sessionId: string;
@@ -15,26 +15,36 @@ interface SelectParams {
   ipAddress: string;
 }
 
+interface CreateSessionParams {
+  question: string;
+  options: string[];
+}
+
 /**
  * Ghi log "join" - chỉ 1 lần duy nhất mỗi user/session.
  * Idempotent: nếu đã join rồi thì bỏ qua, không tạo dòng log trùng.
  */
-export async function joinSession({ sessionId, userId, userAgent, ipAddress }: JoinParams) {
+export async function joinSession({
+  sessionId,
+  userId,
+  userAgent,
+  ipAddress,
+}: JoinParams) {
   const { data: existing, error: checkError } = await supabaseAdmin
-    .from('vote_logs')
-    .select('id')
-    .eq('session_id', sessionId)
-    .eq('user_id', userId)
-    .eq('action', 'join')
+    .from("vote_logs")
+    .select("id")
+    .eq("session_id", sessionId)
+    .eq("user_id", userId)
+    .eq("action", "join")
     .maybeSingle();
 
   if (checkError) throw checkError;
   if (existing) return { alreadyJoined: true };
 
-  const { error: insertError } = await supabaseAdmin.from('vote_logs').insert({
+  const { error: insertError } = await supabaseAdmin.from("vote_logs").insert({
     session_id: sessionId,
     user_id: userId,
-    action: 'join',
+    action: "join",
     option_id: null,
     user_agent: userAgent,
     ip_address: ipAddress,
@@ -50,30 +60,38 @@ export async function joinSession({ sessionId, userId, userAgent, ipAddress }: J
  * Dùng upsert với primary key (session_id, user_id) nên Postgres tự xử lý
  * an toàn khi nhiều request tới cùng lúc cho cùng 1 user (ví dụ user bấm rất nhanh).
  */
-export async function upsertSelection({ sessionId, userId, optionId, userAgent, ipAddress }: SelectParams) {
+export async function upsertSelection({
+  sessionId,
+  userId,
+  optionId,
+  userAgent,
+  ipAddress,
+}: SelectParams) {
   // Chỉ cho phép chọn khi session đang active - chặn cả lúc 'pending' (chưa start),
   // 'paused' (đang tạm dừng) và 'closed' (đã chốt).
   const { data: session, error: sessionError } = await supabaseAdmin
-    .from('sessions')
-    .select('status, ended_at')
-    .eq('id', sessionId)
+    .from("sessions")
+    .select("status, ended_at")
+    .eq("id", sessionId)
     .single();
 
   if (sessionError) throw sessionError;
 
-  const isPastDeadline = session?.ended_at ? new Date(session.ended_at).getTime() <= Date.now() : false;
+  const isPastDeadline = session?.ended_at
+    ? new Date(session.ended_at).getTime() <= Date.now()
+    : false;
 
   // Kiểm tra CẢ status lẫn ended_at: việc khóa (/session/:id/close) do trang admin
   // chủ động gọi khi countdown về 0, không có tiến trình nền nào tự khóa hộ.
   // Nếu admin gọi trễ vài giây (mạng chậm, thao tác chậm), server vẫn tự chặn ghi mới
   // ngay khi qua deadline thật, không phụ thuộc vào việc status đã kịp chuyển 'closed' hay chưa.
-  if (!session || session.status !== 'active' || isPastDeadline) {
-    const err: any = new Error('session_not_active');
-    err.code = 'session_not_active';
+  if (!session || session.status !== "active" || isPastDeadline) {
+    const err: any = new Error("session_not_active");
+    err.code = "session_not_active";
     throw err;
   }
 
-  const { error } = await supabaseAdmin.from('selections').upsert(
+  const { error } = await supabaseAdmin.from("selections").upsert(
     {
       session_id: sessionId,
       user_id: userId,
@@ -82,7 +100,7 @@ export async function upsertSelection({ sessionId, userId, optionId, userAgent, 
       ip_address: ipAddress,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: 'session_id,user_id' }
+    { onConflict: "session_id,user_id" },
   );
 
   if (error) throw error;
@@ -97,24 +115,24 @@ export async function upsertSelection({ sessionId, userId, optionId, userAgent, 
  */
 export async function closeSession(sessionId: string) {
   const { data: session, error: sessionError } = await supabaseAdmin
-    .from('sessions')
-    .select('status')
-    .eq('id', sessionId)
+    .from("sessions")
+    .select("status")
+    .eq("id", sessionId)
     .single();
 
   if (sessionError) throw sessionError;
   if (!session) {
-    const err: any = new Error('session_not_found');
-    err.code = 'session_not_found';
+    const err: any = new Error("session_not_found");
+    err.code = "session_not_found";
     throw err;
   }
-  if (session.status === 'closed') {
+  if (session.status === "closed") {
     return { alreadyClosed: true };
   }
 
   // Gọi Postgres function `close_session` (xem migrations/001_close_session_function.sql)
   // để đảm bảo toàn bộ bước chạy trong 1 transaction atomic.
-  const { error: rpcError } = await supabaseAdmin.rpc('close_session', {
+  const { error: rpcError } = await supabaseAdmin.rpc("close_session", {
     p_session_id: sessionId,
   });
 
@@ -129,16 +147,16 @@ export async function closeSession(sessionId: string) {
 export async function startSession(sessionId: string, durationSeconds: number) {
   const now = new Date().toISOString();
   const { error } = await supabaseAdmin
-    .from('sessions')
+    .from("sessions")
     .update({
-      status: 'active',
+      status: "active",
       started_at: now,
       duration_seconds: durationSeconds,
       ended_at: new Date(Date.now() + durationSeconds * 1000).toISOString(),
       remaining_seconds: null,
       paused_at: null,
     })
-    .eq('id', sessionId);
+    .eq("id", sessionId);
 
   if (error) throw error;
 }
@@ -149,30 +167,32 @@ export async function startSession(sessionId: string, durationSeconds: number) {
  */
 export async function pauseSession(sessionId: string) {
   const { data: session, error: sessionError } = await supabaseAdmin
-    .from('sessions')
-    .select('status, ended_at')
-    .eq('id', sessionId)
+    .from("sessions")
+    .select("status, ended_at")
+    .eq("id", sessionId)
     .single();
 
   if (sessionError) throw sessionError;
-  if (!session || session.status !== 'active') {
-    const err: any = new Error('session_not_active');
-    err.code = 'session_not_active';
+  if (!session || session.status !== "active") {
+    const err: any = new Error("session_not_active");
+    err.code = "session_not_active";
     throw err;
   }
 
-  const remainingMs = session.ended_at ? new Date(session.ended_at).getTime() - Date.now() : 0;
+  const remainingMs = session.ended_at
+    ? new Date(session.ended_at).getTime() - Date.now()
+    : 0;
   const remainingSeconds = Math.max(0, Math.round(remainingMs / 1000));
 
   const { error } = await supabaseAdmin
-    .from('sessions')
+    .from("sessions")
     .update({
-      status: 'paused',
+      status: "paused",
       remaining_seconds: remainingSeconds,
       paused_at: new Date().toISOString(),
       ended_at: null,
     })
-    .eq('id', sessionId);
+    .eq("id", sessionId);
 
   if (error) throw error;
   return { remainingSeconds };
@@ -183,29 +203,29 @@ export async function pauseSession(sessionId: string) {
  */
 export async function resumeSession(sessionId: string) {
   const { data: session, error: sessionError } = await supabaseAdmin
-    .from('sessions')
-    .select('status, remaining_seconds')
-    .eq('id', sessionId)
+    .from("sessions")
+    .select("status, remaining_seconds")
+    .eq("id", sessionId)
     .single();
 
   if (sessionError) throw sessionError;
-  if (!session || session.status !== 'paused') {
-    const err: any = new Error('session_not_paused');
-    err.code = 'session_not_paused';
+  if (!session || session.status !== "paused") {
+    const err: any = new Error("session_not_paused");
+    err.code = "session_not_paused";
     throw err;
   }
 
   const remainingSeconds = session.remaining_seconds ?? 0;
 
   const { error } = await supabaseAdmin
-    .from('sessions')
+    .from("sessions")
     .update({
-      status: 'active',
+      status: "active",
       ended_at: new Date(Date.now() + remainingSeconds * 1000).toISOString(),
       remaining_seconds: null,
       paused_at: null,
     })
-    .eq('id', sessionId);
+    .eq("id", sessionId);
 
   if (error) throw error;
   return { ok: true, remainingSeconds };
@@ -213,18 +233,20 @@ export async function resumeSession(sessionId: string) {
 
 export async function getSessionInfo(sessionId: string) {
   const { data: session, error: sessionError } = await supabaseAdmin
-    .from('sessions')
-    .select('id, question, status, duration_seconds, started_at, ended_at, remaining_seconds, paused_at')
-    .eq('id', sessionId)
+    .from("sessions")
+    .select(
+      "id, question, status, duration_seconds, started_at, ended_at, remaining_seconds, paused_at",
+    )
+    .eq("id", sessionId)
     .single();
 
   if (sessionError) throw sessionError;
 
   const { data: options, error: optionsError } = await supabaseAdmin
-    .from('options')
-    .select('id, label, sort_order')
-    .eq('session_id', sessionId)
-    .order('sort_order', { ascending: true });
+    .from("options")
+    .select("id, label, sort_order")
+    .eq("session_id", sessionId)
+    .order("sort_order", { ascending: true });
 
   if (optionsError) throw optionsError;
 
@@ -234,10 +256,10 @@ export async function getSessionInfo(sessionId: string) {
 /** Đếm số lượng đã chọn (không breakdown theo đáp án) - dùng lúc đang mở vote. */
 export async function countCurrentSelections(sessionId: string) {
   const { count, error } = await supabaseAdmin
-    .from('selections')
-    .select('user_id', { count: 'exact', head: true })
-    .eq('session_id', sessionId)
-    .not('option_id', 'is', null);
+    .from("selections")
+    .select("user_id", { count: "exact", head: true })
+    .eq("session_id", sessionId)
+    .not("option_id", "is", null);
 
   if (error) throw error;
   return count ?? 0;
@@ -246,16 +268,16 @@ export async function countCurrentSelections(sessionId: string) {
 /** Bảng xếp hạng đầy đủ - chỉ có ý nghĩa sau khi session đã closed. */
 export async function getResults(sessionId: string) {
   const { data: options, error: optionsError } = await supabaseAdmin
-    .from('options')
-    .select('id, label')
-    .eq('session_id', sessionId);
+    .from("options")
+    .select("id, label")
+    .eq("session_id", sessionId);
 
   if (optionsError) throw optionsError;
 
   const { data: votes, error: votesError } = await supabaseAdmin
-    .from('votes')
-    .select('option_id')
-    .eq('session_id', sessionId);
+    .from("votes")
+    .select("option_id")
+    .eq("session_id", sessionId);
 
   if (votesError) throw votesError;
 
@@ -271,8 +293,72 @@ export async function getResults(sessionId: string) {
   }
 
   const ranking = (options ?? [])
-    .map((opt) => ({ optionId: opt.id, label: opt.label, votes: countMap.get(opt.id) ?? 0 }))
+    .map((opt) => ({
+      optionId: opt.id,
+      label: opt.label,
+      votes: countMap.get(opt.id) ?? 0,
+    }))
     .sort((a, b) => b.votes - a.votes);
 
   return { ranking, noAnswerCount, totalParticipants: (votes ?? []).length };
+}
+
+/**
+ * Tạo câu hỏi mới (admin). Insert session ở trạng thái 'pending' + các options,
+ * trong 1 thao tác — nếu insert options lỗi thì rollback (xóa session vừa tạo)
+ * để tránh để lại session rỗng không có lựa chọn.
+ */
+export async function createSession({
+  question,
+  options,
+}: CreateSessionParams) {
+  const trimmedQuestion = question.trim();
+  const cleanOptions = options.map((o) => o.trim()).filter(Boolean);
+
+  if (!trimmedQuestion) {
+    const err: any = new Error("invalid_question");
+    err.code = "invalid_question";
+    throw err;
+  }
+  if (cleanOptions.length < 2) {
+    const err: any = new Error("invalid_options");
+    err.code = "invalid_options";
+    throw err;
+  }
+
+  const { data: session, error: sessionError } = await supabaseAdmin
+    .from("sessions")
+    .insert({ question: trimmedQuestion, status: "pending" })
+    .select("id, question, status, created_at")
+    .single();
+
+  if (sessionError) throw sessionError;
+
+  const optionRows = cleanOptions.map((label, index) => ({
+    session_id: session.id,
+    label,
+    sort_order: index + 1,
+  }));
+
+  const { error: optionsError } = await supabaseAdmin
+    .from("options")
+    .insert(optionRows);
+
+  if (optionsError) {
+    await supabaseAdmin.from("sessions").delete().eq("id", session.id);
+    throw optionsError;
+  }
+
+  return session;
+}
+
+/** Danh sách toàn bộ câu hỏi đã tạo, mới nhất trước - phục vụ trang quản lý. */
+export async function listSessions() {
+  const { data, error } = await supabaseAdmin
+    .from("sessions")
+    .select("id, question, status, created_at")
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return data ?? [];
 }

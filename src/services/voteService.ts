@@ -51,8 +51,8 @@ export async function joinSession({ sessionId, userId, userAgent, ipAddress }: J
  * an toàn khi nhiều request tới cùng lúc cho cùng 1 user (ví dụ user bấm rất nhanh).
  */
 export async function upsertSelection({ sessionId, userId, optionId, userAgent, ipAddress }: SelectParams) {
-  // Chỉ cho phép chọn khi session đang active - chặn trường hợp user gửi request trễ
-  // sau khi hệ thống đã khóa (ví dụ do mạng chậm).
+  // Chỉ cho phép chọn khi session đang active - chặn cả lúc 'pending' (chưa start),
+  // 'paused' (đang tạm dừng) và 'closed' (đã chốt).
   const { data: session, error: sessionError } = await supabaseAdmin
     .from('sessions')
     .select('status, ended_at')
@@ -112,7 +112,7 @@ export async function closeSession(sessionId: string) {
     return { alreadyClosed: true };
   }
 
-  // Gọi Postgres function `close_session` (xem migrations/002_close_session_fn.sql)
+  // Gọi Postgres function `close_session` (xem migrations/001_close_session_function.sql)
   // để đảm bảo toàn bộ bước chạy trong 1 transaction atomic.
   const { error: rpcError } = await supabaseAdmin.rpc('close_session', {
     p_session_id: sessionId,
@@ -122,6 +122,10 @@ export async function closeSession(sessionId: string) {
   return { alreadyClosed: false };
 }
 
+/**
+ * Mở vote: set 'active', tính ended_at = now + durationSeconds.
+ * Dùng cả để Start lần đầu (từ 'pending') lẫn Restart (từ 'closed', hiếm khi cần).
+ */
 export async function startSession(sessionId: string, durationSeconds: number) {
   const now = new Date().toISOString();
   const { error } = await supabaseAdmin
@@ -131,16 +135,86 @@ export async function startSession(sessionId: string, durationSeconds: number) {
       started_at: now,
       duration_seconds: durationSeconds,
       ended_at: new Date(Date.now() + durationSeconds * 1000).toISOString(),
+      remaining_seconds: null,
+      paused_at: null,
     })
     .eq('id', sessionId);
 
   if (error) throw error;
 }
 
+/**
+ * Tạm dừng đếm giờ. Lưu lại số giây còn lại vào remaining_seconds, xóa ended_at
+ * (không có hạn chót trong lúc pause) để upsertSelection tự chặn ghi mới.
+ */
+export async function pauseSession(sessionId: string) {
+  const { data: session, error: sessionError } = await supabaseAdmin
+    .from('sessions')
+    .select('status, ended_at')
+    .eq('id', sessionId)
+    .single();
+
+  if (sessionError) throw sessionError;
+  if (!session || session.status !== 'active') {
+    const err: any = new Error('session_not_active');
+    err.code = 'session_not_active';
+    throw err;
+  }
+
+  const remainingMs = session.ended_at ? new Date(session.ended_at).getTime() - Date.now() : 0;
+  const remainingSeconds = Math.max(0, Math.round(remainingMs / 1000));
+
+  const { error } = await supabaseAdmin
+    .from('sessions')
+    .update({
+      status: 'paused',
+      remaining_seconds: remainingSeconds,
+      paused_at: new Date().toISOString(),
+      ended_at: null,
+    })
+    .eq('id', sessionId);
+
+  if (error) throw error;
+  return { remainingSeconds };
+}
+
+/**
+ * Tiếp tục đếm giờ từ chỗ đã dừng: ended_at = now + remaining_seconds đã lưu lúc pause.
+ */
+export async function resumeSession(sessionId: string) {
+  const { data: session, error: sessionError } = await supabaseAdmin
+    .from('sessions')
+    .select('status, remaining_seconds')
+    .eq('id', sessionId)
+    .single();
+
+  if (sessionError) throw sessionError;
+  if (!session || session.status !== 'paused') {
+    const err: any = new Error('session_not_paused');
+    err.code = 'session_not_paused';
+    throw err;
+  }
+
+  const remainingSeconds = session.remaining_seconds ?? 0;
+
+  const { error } = await supabaseAdmin
+    .from('sessions')
+    .update({
+      status: 'active',
+      ended_at: new Date(Date.now() + remainingSeconds * 1000).toISOString(),
+      remaining_seconds: null,
+      paused_at: null,
+    })
+    .eq('id', sessionId);
+
+  if (error) throw error;
+  return { ok: true, remainingSeconds };
+}
+
 export async function getSessionInfo(sessionId: string) {
   const { data: session, error: sessionError } = await supabaseAdmin
     .from('sessions')
-    .select('id, question, status, duration_seconds, started_at, ended_at')
+    .select('id, question, status, duration_seconds, started_at, ended_at, remaining_seconds, paused_at')
     .eq('id', sessionId)
     .single();
 

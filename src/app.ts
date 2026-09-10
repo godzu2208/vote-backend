@@ -5,6 +5,7 @@ import selectRoutes from './routes/select.routes';
 import sessionRoutes from './routes/session.routes';
 import resultsRoutes from './routes/results.routes';
 import logsRoutes from './routes/logs.routes';
+import gameRoutes from './routes/game.routes';
 
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN;
 
@@ -29,6 +30,7 @@ export function createApp() {
   app.use('/api', sessionRoutes);
   app.use('/api', resultsRoutes);
   app.use('/api', logsRoutes);
+  app.use('/api', gameRoutes);
 
   // Handler lỗi chung - phòng khi có lỗi không được catch ở route
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

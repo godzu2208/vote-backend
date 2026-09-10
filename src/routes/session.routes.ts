@@ -10,6 +10,7 @@ import {
   createSession,
   listSessions,
   getLiveStats,
+  getJoinedCount,
 } from "../services/voteService";
 
 const router = Router();
@@ -97,6 +98,18 @@ router.get("/session/code/:code", authMiddleware, async (req, res) => {
     return res.json({ session });
   } catch (err) {
     console.error("[GET /session/code/:code]", err);
+    return res.status(500).json({ error: "internal_error" });
+  }
+});
+
+// Số người đã vào phòng - dùng cho màn hình chờ của user.
+// Chỉ trả về một con số, không lộ danh sách user.
+router.get("/session/:id/joined-count", authMiddleware, async (req, res) => {
+  try {
+    const count = await getJoinedCount(req.params.id);
+    return res.json({ count });
+  } catch (err) {
+    console.error("[GET /session/:id/joined-count]", err);
     return res.status(500).json({ error: "internal_error" });
   }
 });

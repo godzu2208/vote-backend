@@ -177,6 +177,35 @@ export async function closeSession(sessionId: string) {
  * Dùng cả để Start lần đầu (từ 'pending') lẫn Restart (từ 'closed', hiếm khi cần).
  */
 export async function startSession(sessionId: string, durationSeconds: number) {
+  // Khi bấm "Bắt đầu lại" từ một session đã closed, đây phải là một vòng vote mới.
+  // Xóa dữ liệu của vòng cũ trong transaction để bảng `votes` không giữ kết quả cũ
+  // và user có thể vote lại bình thường. RPC cũng xóa `vote_logs` để Joined/Waiting
+  // của vòng mới được tính lại từ đầu.
+  const { data: current, error: currentError } = await supabaseAdmin
+    .from("sessions")
+    .select("status")
+    .eq("id", sessionId)
+    .single();
+
+  if (currentError) throw currentError;
+  if (!current) {
+    const err: any = new Error("session_not_found");
+    err.code = "session_not_found";
+    throw err;
+  }
+
+  if (current.status === "closed") {
+    const { error: restartError } = await supabaseAdmin.rpc(
+      "restart_session",
+      {
+        p_session_id: sessionId,
+        p_duration_seconds: durationSeconds,
+      },
+    );
+    if (restartError) throw restartError;
+    return;
+  }
+
   const now = new Date().toISOString();
   const { error } = await supabaseAdmin
     .from("sessions")
@@ -309,6 +338,17 @@ export async function getSessionByCode(code: string) {
  * Voted = distinct users hiện có selection với option_id.
  * Waiting = Joined - Voted.
  */
+export async function getJoinedCount(sessionId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("vote_logs")
+    .select("user_id")
+    .eq("session_id", sessionId)
+    .eq("action", "join");
+
+  if (error) throw error;
+  return new Set((data ?? []).map((row) => row.user_id)).size;
+}
+
 export async function getLiveStats(sessionId: string) {
   const [{ data: joins, error: joinsError }, { data: selections, error: selectionsError }] =
     await Promise.all([

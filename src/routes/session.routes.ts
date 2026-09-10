@@ -2,19 +2,24 @@ import { Router } from "express";
 import { authMiddleware, requireAdmin } from "../middleware/auth";
 import {
   getSessionInfo,
+  getSessionByCode,
   startSession,
   closeSession,
   pauseSession,
   resumeSession,
   createSession,
   listSessions,
+  getLiveStats,
 } from "../services/voteService";
 
 const router = Router();
 
-// Tạo câu hỏi mới (admin only). Body: { question: string, options: string[] }
+// Mã tham gia: 3-8 ký tự chữ/số, admin tự đặt (tùy chọn) hoặc để hệ thống tự sinh.
+const JOIN_CODE_PATTERN = /^[A-Za-z0-9]{3,8}$/;
+
+// Tạo câu hỏi mới (admin only). Body: { question: string, options: string[], joinCode?: string }
 router.post("/session", authMiddleware, requireAdmin, async (req, res) => {
-  const { question, options } = req.body ?? {};
+  const { question, options, joinCode } = req.body ?? {};
   if (typeof question !== "string" || !question.trim()) {
     return res
       .status(400)
@@ -28,10 +33,39 @@ router.post("/session", authMiddleware, requireAdmin, async (req, res) => {
       .status(400)
       .json({ error: "invalid_body", message: "Cần tối thiểu 2 lựa chọn." });
   }
+  if (joinCode !== undefined && joinCode !== null && joinCode !== "") {
+    if (
+      typeof joinCode !== "string" ||
+      !JOIN_CODE_PATTERN.test(joinCode.trim())
+    ) {
+      return res.status(400).json({
+        error: "invalid_body",
+        message: "Mã tham gia phải là 3-8 ký tự chữ hoặc số.",
+      });
+    }
+  }
   try {
-    const session = await createSession({ question, options });
+    const session = await createSession({ question, options, joinCode });
     return res.status(201).json({ ok: true, session });
-  } catch (err) {
+  } catch (err: any) {
+    if (err.code === "join_code_taken") {
+      return res.status(409).json({
+        error: "join_code_taken",
+        message: "Mã tham gia này đã được dùng, hãy chọn mã khác.",
+      });
+    }
+    if (err.code === "23505" || err?.details?.includes?.("sessions_join_code_uidx")) {
+      return res.status(409).json({
+        error: "join_code_taken",
+        message: "Mã tham gia này đã được dùng, hãy chọn mã khác.",
+      });
+    }
+    if (err.code === "join_code_generation_failed") {
+      return res.status(500).json({
+        error: "join_code_generation_failed",
+        message: "Không thể tự sinh mã tham gia, vui lòng thử lại.",
+      });
+    }
     console.error("[POST /session]", err);
     return res.status(500).json({ error: "internal_error" });
   }
@@ -47,6 +81,41 @@ router.get("/sessions", authMiddleware, requireAdmin, async (req, res) => {
     return res.status(500).json({ error: "internal_error" });
   }
 });
+
+// Tra sessionId từ mã tham gia ngắn - dùng ở màn hình user nhập mã trước khi /join.
+// Đặt TRƯỚC "/session/:id" không cần thiết vì path khác nhau ("/session/code/:code"
+// so với "/session/:id"), nhưng vẫn đặt sớm trong file cho dễ đọc.
+router.get("/session/code/:code", authMiddleware, async (req, res) => {
+  try {
+    const session = await getSessionByCode(req.params.code);
+    if (!session) {
+      return res.status(404).json({
+        error: "not_found",
+        message: "Mã tham gia không hợp lệ hoặc không tồn tại.",
+      });
+    }
+    return res.json({ session });
+  } catch (err) {
+    console.error("[GET /session/code/:code]", err);
+    return res.status(500).json({ error: "internal_error" });
+  }
+});
+
+// Thống kê realtime cho màn hình MC (admin only).
+router.get(
+  "/session/:id/live-stats",
+  authMiddleware,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const stats = await getLiveStats(req.params.id);
+      return res.json(stats);
+    } catch (err) {
+      console.error("[GET /session/:id/live-stats]", err);
+      return res.status(500).json({ error: "internal_error" });
+    }
+  },
+);
 
 router.get("/session/:id", authMiddleware, async (req, res) => {
   try {

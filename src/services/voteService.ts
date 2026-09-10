@@ -18,6 +18,38 @@ interface SelectParams {
 interface CreateSessionParams {
   question: string;
   options: string[];
+  /** Mã tham gia ngắn do admin tự đặt (tùy chọn). Nếu không truyền, hệ thống tự sinh. */
+  joinCode?: string | null;
+}
+
+// Bộ ký tự dùng để tự sinh mã - bỏ 0/O và 1/I/L để tránh nhầm lẫn khi đọc to / nhập tay.
+const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+function randomCode(length = 4): string {
+  let code = "";
+  for (let i = 0; i < length; i++) {
+    code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+  }
+  return code;
+}
+
+/** Tự sinh mã tham gia chưa từng được dùng - thử tối đa 10 lần trước khi báo lỗi. */
+async function generateUniqueJoinCode(): Promise<string> {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const code = randomCode(4);
+    const { data: existing, error } = await supabaseAdmin
+      .from("sessions")
+      .select("id")
+      .eq("join_code", code)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!existing) return code;
+  }
+
+  const err: any = new Error("join_code_generation_failed");
+  err.code = "join_code_generation_failed";
+  throw err;
 }
 
 /**
@@ -235,7 +267,7 @@ export async function getSessionInfo(sessionId: string) {
   const { data: session, error: sessionError } = await supabaseAdmin
     .from("sessions")
     .select(
-      "id, question, status, duration_seconds, started_at, ended_at, remaining_seconds, paused_at",
+      "id, question, status, duration_seconds, started_at, ended_at, remaining_seconds, paused_at, join_code",
     )
     .eq("id", sessionId)
     .single();
@@ -251,6 +283,68 @@ export async function getSessionInfo(sessionId: string) {
   if (optionsError) throw optionsError;
 
   return { ...session, options: options ?? [] };
+}
+
+/**
+ * Tra sessionId từ join_code - dùng cho màn hình user nhập mã trước khi join.
+ * Trả về null nếu mã không tồn tại (route sẽ tự quyết định trả 404).
+ */
+export async function getSessionByCode(code: string) {
+  const normalized = code.trim().toUpperCase();
+  if (!normalized) return null;
+
+  const { data: session, error } = await supabaseAdmin
+    .from("sessions")
+    .select("id, question, status, join_code")
+    .eq("join_code", normalized)
+    .maybeSingle();
+
+  if (error) throw error;
+  return session;
+}
+
+/**
+ * Thống kê realtime trong lúc phòng đang chờ/mở vote.
+ * Joined = distinct users có log action=join.
+ * Voted = distinct users hiện có selection với option_id.
+ * Waiting = Joined - Voted.
+ */
+export async function getLiveStats(sessionId: string) {
+  const [{ data: joins, error: joinsError }, { data: selections, error: selectionsError }] =
+    await Promise.all([
+      supabaseAdmin
+        .from("vote_logs")
+        .select("user_id")
+        .eq("session_id", sessionId)
+        .eq("action", "join"),
+      supabaseAdmin
+        .from("selections")
+        .select("user_id, option_id")
+        .eq("session_id", sessionId),
+    ]);
+
+  if (joinsError) throw joinsError;
+  if (selectionsError) throw selectionsError;
+
+  const joinedUsers = new Set((joins ?? []).map((row) => row.user_id));
+  const optionCounts: Record<string, number> = {};
+  const votedUsers = new Set<string>();
+
+  for (const row of selections ?? []) {
+    if (!row.option_id) continue;
+    votedUsers.add(row.user_id);
+    optionCounts[row.option_id] = (optionCounts[row.option_id] ?? 0) + 1;
+  }
+
+  const joinedCount = joinedUsers.size;
+  const votedCount = votedUsers.size;
+
+  return {
+    joinedCount,
+    votedCount,
+    waitingCount: Math.max(0, joinedCount - votedCount),
+    optionCounts,
+  };
 }
 
 /** Đếm số lượng đã chọn (không breakdown theo đáp án) - dùng lúc đang mở vote. */
@@ -307,10 +401,15 @@ export async function getResults(sessionId: string) {
  * Tạo câu hỏi mới (admin). Insert session ở trạng thái 'pending' + các options,
  * trong 1 thao tác — nếu insert options lỗi thì rollback (xóa session vừa tạo)
  * để tránh để lại session rỗng không có lựa chọn.
+ *
+ * Mỗi session được gán 1 `join_code` ngắn (3-8 ký tự) để user nhập thay vì
+ * dùng UUID dài. Admin có thể tự đặt mã qua `joinCode`, nếu không truyền
+ * (hoặc để rỗng) hệ thống tự sinh mã ngẫu nhiên 4 ký tự.
  */
 export async function createSession({
   question,
   options,
+  joinCode,
 }: CreateSessionParams) {
   const trimmedQuestion = question.trim();
   const cleanOptions = options.map((o) => o.trim()).filter(Boolean);
@@ -326,10 +425,34 @@ export async function createSession({
     throw err;
   }
 
+  let finalCode: string;
+  if (joinCode && joinCode.trim()) {
+    finalCode = joinCode.trim().toUpperCase();
+
+    const { data: existing, error: checkError } = await supabaseAdmin
+      .from("sessions")
+      .select("id")
+      .eq("join_code", finalCode)
+      .maybeSingle();
+
+    if (checkError) throw checkError;
+    if (existing) {
+      const err: any = new Error("join_code_taken");
+      err.code = "join_code_taken";
+      throw err;
+    }
+  } else {
+    finalCode = await generateUniqueJoinCode();
+  }
+
   const { data: session, error: sessionError } = await supabaseAdmin
     .from("sessions")
-    .insert({ question: trimmedQuestion, status: "pending" })
-    .select("id, question, status, created_at")
+    .insert({
+      question: trimmedQuestion,
+      status: "pending",
+      join_code: finalCode,
+    })
+    .select("id, question, status, join_code, created_at")
     .single();
 
   if (sessionError) throw sessionError;
@@ -356,7 +479,7 @@ export async function createSession({
 export async function listSessions() {
   const { data, error } = await supabaseAdmin
     .from("sessions")
-    .select("id, question, status, created_at")
+    .select("id, question, status, created_at, join_code")
     .order("created_at", { ascending: false });
 
   if (error) throw error;

@@ -481,7 +481,7 @@ export async function getGamePublicResults(gameId: string) {
           .order("sort_order", { ascending: true }),
         supabaseAdmin
           .from("votes")
-          .select("option_id")
+          .select("user_id, option_id")
           .eq("session_id", question.id),
       ]);
 
@@ -489,15 +489,15 @@ export async function getGamePublicResults(gameId: string) {
       if (votesError) throw votesError;
 
       const countMap = new Map<string, number>();
-      let noAnswerCount = 0;
+      const votedUsers = new Set<string>();
 
       for (const vote of votes ?? []) {
-        if (!vote.option_id) {
-          noAnswerCount += 1;
-          continue;
-        }
+        if (!vote.option_id) continue;
+        votedUsers.add(vote.user_id);
         countMap.set(vote.option_id, (countMap.get(vote.option_id) ?? 0) + 1);
       }
+
+      const noAnswerCount = Math.max(0, participantCount - votedUsers.size);
 
       const ranking = (options ?? [])
         .map((option: any) => ({

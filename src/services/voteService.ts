@@ -403,30 +403,44 @@ export async function countCurrentSelections(sessionId: string) {
 
 /** Bảng xếp hạng đầy đủ - chỉ có ý nghĩa sau khi session đã closed. */
 export async function getResults(sessionId: string) {
-  const { data: options, error: optionsError } = await supabaseAdmin
-    .from("options")
-    .select("id, label")
-    .eq("session_id", sessionId);
+  const [
+    { data: options, error: optionsError },
+    { data: joins, error: joinsError },
+    { data: votes, error: votesError },
+  ] = await Promise.all([
+    supabaseAdmin
+      .from("options")
+      .select("id, label")
+      .eq("session_id", sessionId),
+    supabaseAdmin
+      .from("vote_logs")
+      .select("user_id")
+      .eq("session_id", sessionId)
+      .eq("action", "join"),
+    supabaseAdmin
+      .from("votes")
+      .select("user_id, option_id")
+      .eq("session_id", sessionId),
+  ]);
 
   if (optionsError) throw optionsError;
-
-  const { data: votes, error: votesError } = await supabaseAdmin
-    .from("votes")
-    .select("option_id")
-    .eq("session_id", sessionId);
-
+  if (joinsError) throw joinsError;
   if (votesError) throw votesError;
 
+  const uniqueJoinedUsers = new Set((joins ?? []).map((row) => row.user_id));
+  const totalParticipants = uniqueJoinedUsers.size;
+
   const countMap = new Map<string, number>();
-  let noAnswerCount = 0;
+  const votedUsers = new Set<string>();
 
   for (const v of votes ?? []) {
-    if (!v.option_id) {
-      noAnswerCount += 1;
-      continue;
+    if (v.option_id) {
+      votedUsers.add(v.user_id);
+      countMap.set(v.option_id, (countMap.get(v.option_id) ?? 0) + 1);
     }
-    countMap.set(v.option_id, (countMap.get(v.option_id) ?? 0) + 1);
   }
+
+  const noAnswerCount = Math.max(0, totalParticipants - votedUsers.size);
 
   const ranking = (options ?? [])
     .map((opt) => ({
@@ -436,7 +450,7 @@ export async function getResults(sessionId: string) {
     }))
     .sort((a, b) => b.votes - a.votes);
 
-  return { ranking, noAnswerCount, totalParticipants: (votes ?? []).length };
+  return { ranking, noAnswerCount, totalParticipants };
 }
 
 /**

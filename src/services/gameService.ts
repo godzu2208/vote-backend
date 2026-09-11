@@ -52,12 +52,21 @@ async function generateUniquePin() {
 function normalizeQuestion(input: GameQuestionInput, index: number) {
   const question = input.question?.trim();
   const options = (input.options ?? []).map((x) => x.trim()).filter(Boolean);
-  if (!question) throw Object.assign(new Error("invalid_question"), { code: "invalid_question" });
-  if (options.length < 2) throw Object.assign(new Error("invalid_options"), { code: "invalid_options" });
+  if (!question)
+    throw Object.assign(new Error("invalid_question"), {
+      code: "invalid_question",
+    });
+  if (options.length < 2)
+    throw Object.assign(new Error("invalid_options"), {
+      code: "invalid_options",
+    });
 
-  const duration = input.durationSeconds == null ? 20 : Number(input.durationSeconds);
+  const duration =
+    input.durationSeconds == null ? 20 : Number(input.durationSeconds);
   if (!Number.isFinite(duration) || duration <= 0 || duration > 3600) {
-    throw Object.assign(new Error("invalid_duration"), { code: "invalid_duration" });
+    throw Object.assign(new Error("invalid_duration"), {
+      code: "invalid_duration",
+    });
   }
 
   return {
@@ -73,9 +82,12 @@ function normalizeQuestion(input: GameQuestionInput, index: number) {
 
 export async function createGame(createdBy: string, input: CreateGameInput) {
   const title = input.title?.trim();
-  if (!title) throw Object.assign(new Error("invalid_title"), { code: "invalid_title" });
+  if (!title)
+    throw Object.assign(new Error("invalid_title"), { code: "invalid_title" });
   if (!Array.isArray(input.questions) || input.questions.length < 1) {
-    throw Object.assign(new Error("invalid_questions"), { code: "invalid_questions" });
+    throw Object.assign(new Error("invalid_questions"), {
+      code: "invalid_questions",
+    });
   }
 
   const questions = input.questions.map(normalizeQuestion);
@@ -84,11 +96,17 @@ export async function createGame(createdBy: string, input: CreateGameInput) {
     throw Object.assign(new Error("invalid_pin"), { code: "invalid_pin" });
   }
 
-  const pin = requestedPin || await generateUniquePin();
+  const pin = requestedPin || (await generateUniquePin());
 
   const { data: existing } = await supabaseAdmin
-    .from("games").select("id").eq("pin", pin).maybeSingle();
-  if (existing) throw Object.assign(new Error("game_pin_taken"), { code: "game_pin_taken" });
+    .from("games")
+    .select("id")
+    .eq("pin", pin)
+    .maybeSingle();
+  if (existing)
+    throw Object.assign(new Error("game_pin_taken"), {
+      code: "game_pin_taken",
+    });
 
   const { data: game, error: gameError } = await supabaseAdmin
     .from("games")
@@ -119,7 +137,9 @@ export async function createGame(createdBy: string, input: CreateGameInput) {
           background_value: q.backgroundValue,
           image_url: q.imageUrl,
         })
-        .select("id, question, status, duration_seconds, game_id, sort_order, background_type, background_value, image_url")
+        .select(
+          "id, question, status, duration_seconds, game_id, sort_order, background_type, background_value, image_url",
+        )
         .single();
       if (sessionError) throw sessionError;
 
@@ -128,7 +148,7 @@ export async function createGame(createdBy: string, input: CreateGameInput) {
           session_id: session.id,
           label,
           sort_order: optionIndex + 1,
-        }))
+        })),
       );
       if (optionError) throw optionError;
     }
@@ -140,28 +160,40 @@ export async function createGame(createdBy: string, input: CreateGameInput) {
   return getGame(game.id, createdBy);
 }
 
-
-export async function updateGame(gameId: string, requesterId: string, input: CreateGameInput) {
+export async function updateGame(
+  gameId: string,
+  requesterId: string,
+  input: CreateGameInput,
+) {
   const existing = await getGame(gameId, requesterId);
-  if (!['draft', 'lobby'].includes(existing.status)) {
-    throw Object.assign(new Error("game_not_editable"), { code: "game_not_editable" });
+  if (!["draft", "lobby"].includes(existing.status)) {
+    throw Object.assign(new Error("game_not_editable"), {
+      code: "game_not_editable",
+    });
   }
-  if (existing.status === 'lobby') {
+  if (existing.status === "lobby") {
     const participants = await getParticipantCount(gameId);
     if (participants > 0) {
-      throw Object.assign(new Error("game_lobby_has_participants"), { code: "game_lobby_has_participants" });
+      throw Object.assign(new Error("game_lobby_has_participants"), {
+        code: "game_lobby_has_participants",
+      });
     }
   }
 
   const title = input.title?.trim();
-  if (!title) throw Object.assign(new Error("invalid_title"), { code: "invalid_title" });
+  if (!title)
+    throw Object.assign(new Error("invalid_title"), { code: "invalid_title" });
   if (!Array.isArray(input.questions) || input.questions.length < 1) {
-    throw Object.assign(new Error("invalid_questions"), { code: "invalid_questions" });
+    throw Object.assign(new Error("invalid_questions"), {
+      code: "invalid_questions",
+    });
   }
   const questions = input.questions.map(normalizeQuestion);
   const backgroundType = input.backgroundType ?? "gradient";
-  if (!['color', 'gradient', 'image'].includes(backgroundType)) {
-    throw Object.assign(new Error("invalid_background_type"), { code: "invalid_background_type" });
+  if (!["color", "gradient", "image"].includes(backgroundType)) {
+    throw Object.assign(new Error("invalid_background_type"), {
+      code: "invalid_background_type",
+    });
   }
 
   const { error } = await supabaseAdmin.rpc("update_game_atomic", {
@@ -180,7 +212,9 @@ export async function updateGame(gameId: string, requesterId: string, input: Cre
 export async function listGames(createdBy: string) {
   const { data: games, error } = await supabaseAdmin
     .from("games")
-    .select("id,title,pin,status,cover_url,background_type,background_value,current_session_id,created_at,updated_at")
+    .select(
+      "id,title,pin,status,cover_url,background_type,background_value,current_session_id,created_at,updated_at",
+    )
     .eq("created_by", createdBy)
     .order("created_at", { ascending: false });
   if (error) throw error;
@@ -190,7 +224,9 @@ export async function listGames(createdBy: string) {
 export async function getGame(gameId: string, requesterId?: string) {
   let query = supabaseAdmin
     .from("games")
-    .select("id,title,pin,status,cover_url,background_type,background_value,current_session_id,created_by,created_at,updated_at")
+    .select(
+      "id,title,pin,status,cover_url,background_type,background_value,current_session_id,created_by,created_at,updated_at",
+    )
     .eq("id", gameId);
 
   if (requesterId) query = query.eq("created_by", requesterId);
@@ -199,20 +235,24 @@ export async function getGame(gameId: string, requesterId?: string) {
 
   const { data: sessions, error: sessionsError } = await supabaseAdmin
     .from("sessions")
-    .select("id,question,status,duration_seconds,started_at,ended_at,remaining_seconds,paused_at,game_id,sort_order,background_type,background_value,image_url")
+    .select(
+      "id,question,status,duration_seconds,started_at,ended_at,remaining_seconds,paused_at,game_id,sort_order,background_type,background_value,image_url",
+    )
     .eq("game_id", gameId)
     .order("sort_order", { ascending: true });
   if (sessionsError) throw sessionsError;
 
-  const questions = await Promise.all((sessions ?? []).map(async (session: any) => {
-    const { data: options, error: optionsError } = await supabaseAdmin
-      .from("options")
-      .select("id,label,sort_order")
-      .eq("session_id", session.id)
-      .order("sort_order", { ascending: true });
-    if (optionsError) throw optionsError;
-    return { ...session, options: options ?? [] };
-  }));
+  const questions = await Promise.all(
+    (sessions ?? []).map(async (session: any) => {
+      const { data: options, error: optionsError } = await supabaseAdmin
+        .from("options")
+        .select("id,label,sort_order")
+        .eq("session_id", session.id)
+        .order("sort_order", { ascending: true });
+      if (optionsError) throw optionsError;
+      return { ...session, options: options ?? [] };
+    }),
+  );
 
   return { ...game, server_now: new Date().toISOString(), questions };
 }
@@ -222,16 +262,25 @@ export async function getGameByPin(pin: string) {
   if (!normalized) return null;
   const { data, error } = await supabaseAdmin
     .from("games")
-    .select("id,title,pin,status,cover_url,background_type,background_value,current_session_id,created_at")
+    .select(
+      "id,title,pin,status,cover_url,background_type,background_value,current_session_id,created_at",
+    )
     .eq("pin", normalized)
     .maybeSingle();
   if (error) throw error;
   return data;
 }
 
-export async function joinGame(gameId: string, userId: string, displayName: string) {
+export async function joinGame(
+  gameId: string,
+  userId: string,
+  displayName: string,
+) {
   const name = displayName.trim().slice(0, 80);
-  if (!name) throw Object.assign(new Error("invalid_display_name"), { code: "invalid_display_name" });
+  if (!name)
+    throw Object.assign(new Error("invalid_display_name"), {
+      code: "invalid_display_name",
+    });
 
   const { error } = await supabaseAdmin.rpc("touch_game_participant", {
     p_game_id: gameId,
@@ -266,15 +315,21 @@ export async function getParticipantCount(gameId: string) {
   return count ?? 0;
 }
 
-async function setCurrentQuestion(gameId: string, sessionId: string, status: "active" | "pending", durationSeconds = 20) {
+async function setCurrentQuestion(
+  gameId: string,
+  sessionId: string,
+  status: "active" | "pending",
+  durationSeconds = 20,
+) {
   const { error: sessionError } = await supabaseAdmin
     .from("sessions")
     .update({
       status,
       started_at: status === "active" ? new Date().toISOString() : null,
-      ended_at: status === "active"
-        ? new Date(Date.now() + durationSeconds * 1000).toISOString()
-        : null,
+      ended_at:
+        status === "active"
+          ? new Date(Date.now() + durationSeconds * 1000).toISOString()
+          : null,
     })
     .eq("id", sessionId);
   if (sessionError) throw sessionError;
@@ -292,24 +347,31 @@ async function setCurrentQuestion(gameId: string, sessionId: string, status: "ac
 
 export async function enterLobby(gameId: string, requesterId: string) {
   const game = await getGame(gameId, requesterId);
-  if (!['draft', 'closed', 'lobby'].includes(game.status)) {
+  if (!["draft", "closed", "lobby"].includes(game.status)) {
     return game;
   }
   if (!game.questions[0]) {
-    throw Object.assign(new Error("game_has_no_questions"), { code: "game_has_no_questions" });
+    throw Object.assign(new Error("game_has_no_questions"), {
+      code: "game_has_no_questions",
+    });
   }
 
-  if (game.status === 'closed') {
+  if (game.status === "closed") {
     const { error } = await supabaseAdmin.rpc("reset_game_to_lobby", {
       p_game_id: gameId,
       p_created_by: requesterId,
     });
     if (error) throw error;
-  } else if (game.status === 'draft') {
+  } else if (game.status === "draft") {
     const { error } = await supabaseAdmin
       .from("games")
-      .update({ status: "lobby", current_session_id: game.questions[0].id, updated_at: new Date().toISOString() })
-      .eq("id", gameId).eq("created_by", requesterId);
+      .update({
+        status: "lobby",
+        current_session_id: game.questions[0].id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", gameId)
+      .eq("created_by", requesterId);
     if (error) throw error;
   }
   return getGame(gameId, requesterId);
@@ -317,11 +379,13 @@ export async function enterLobby(gameId: string, requesterId: string) {
 
 export async function startGame(gameId: string, requesterId: string) {
   const game = await getGame(gameId, requesterId);
-  if (!['lobby', 'closed'].includes(game.status)) {
-    throw Object.assign(new Error("game_not_ready"), { code: "game_not_ready" });
+  if (!["lobby", "closed"].includes(game.status)) {
+    throw Object.assign(new Error("game_not_ready"), {
+      code: "game_not_ready",
+    });
   }
 
-  if (game.status === 'closed') {
+  if (game.status === "closed") {
     const { error } = await supabaseAdmin.rpc("reset_game_and_start", {
       p_game_id: gameId,
       p_created_by: requesterId,
@@ -330,19 +394,33 @@ export async function startGame(gameId: string, requesterId: string) {
     return getGame(gameId, requesterId);
   }
 
-  const current = game.questions.find((q: any) => q.id === game.current_session_id) ?? game.questions[0];
-  await setCurrentQuestion(gameId, current.id, "active", current.duration_seconds ?? 20);
+  const current =
+    game.questions.find((q: any) => q.id === game.current_session_id) ??
+    game.questions[0];
+  await setCurrentQuestion(
+    gameId,
+    current.id,
+    "active",
+    current.duration_seconds ?? 20,
+  );
   return getGame(gameId, requesterId);
 }
 
 export async function advanceGame(gameId: string, requesterId: string) {
   const game = await getGame(gameId, requesterId);
   if (game.status !== "active") {
-    throw Object.assign(new Error("game_not_active"), { code: "game_not_active" });
+    throw Object.assign(new Error("game_not_active"), {
+      code: "game_not_active",
+    });
   }
 
-  const currentIndex = game.questions.findIndex((q: any) => q.id === game.current_session_id);
-  if (currentIndex < 0) throw Object.assign(new Error("current_question_not_found"), { code: "current_question_not_found" });
+  const currentIndex = game.questions.findIndex(
+    (q: any) => q.id === game.current_session_id,
+  );
+  if (currentIndex < 0)
+    throw Object.assign(new Error("current_question_not_found"), {
+      code: "current_question_not_found",
+    });
 
   await closeSession(game.questions[currentIndex].id);
 
@@ -350,21 +428,32 @@ export async function advanceGame(gameId: string, requesterId: string) {
   if (!next) {
     const { error } = await supabaseAdmin
       .from("games")
-      .update({ status: "closed", current_session_id: null, updated_at: new Date().toISOString() })
+      .update({
+        status: "closed",
+        current_session_id: null,
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", gameId);
     if (error) throw error;
     return getGame(gameId, requesterId);
   }
 
   // New question = fresh round. Existing session is still pending until activated.
-  await setCurrentQuestion(gameId, next.id, "active", next.duration_seconds ?? 20);
+  await setCurrentQuestion(
+    gameId,
+    next.id,
+    "active",
+    next.duration_seconds ?? 20,
+  );
   return getGame(gameId, requesterId);
 }
 
 export async function closeGame(gameId: string, requesterId: string) {
   const game = await getGame(gameId, requesterId);
   if (game.current_session_id) {
-    const current = game.questions.find((q: any) => q.id === game.current_session_id);
+    const current = game.questions.find(
+      (q: any) => q.id === game.current_session_id,
+    );
     if (current && current.status !== "closed") await closeSession(current.id);
   }
   const { error } = await supabaseAdmin
@@ -375,17 +464,108 @@ export async function closeGame(gameId: string, requesterId: string) {
   return getGame(gameId, requesterId);
 }
 
+export async function getGamePublicResults(gameId: string) {
+  const game = await getGame(gameId);
+  const participantCount = await getParticipantCount(gameId);
+
+  const questions = await Promise.all(
+    (game.questions ?? []).map(async (question: any) => {
+      const [
+        { data: options, error: optionsError },
+        { data: votes, error: votesError },
+      ] = await Promise.all([
+        supabaseAdmin
+          .from("options")
+          .select("id,label,sort_order")
+          .eq("session_id", question.id)
+          .order("sort_order", { ascending: true }),
+        supabaseAdmin
+          .from("votes")
+          .select("option_id")
+          .eq("session_id", question.id),
+      ]);
+
+      if (optionsError) throw optionsError;
+      if (votesError) throw votesError;
+
+      const countMap = new Map<string, number>();
+      let noAnswerCount = 0;
+
+      for (const vote of votes ?? []) {
+        if (!vote.option_id) {
+          noAnswerCount += 1;
+          continue;
+        }
+        countMap.set(vote.option_id, (countMap.get(vote.option_id) ?? 0) + 1);
+      }
+
+      const ranking = (options ?? [])
+        .map((option: any) => ({
+          optionId: option.id,
+          label: option.label,
+          votes: countMap.get(option.id) ?? 0,
+        }))
+        .sort((a: any, b: any) => b.votes - a.votes);
+
+      const totalVotes = (votes ?? []).filter(
+        (vote: any) => vote.option_id,
+      ).length;
+
+      return {
+        questionId: question.id,
+        questionNumber: question.sort_order,
+        question: question.question,
+        status: question.status,
+        startedAt: question.started_at,
+        endedAt: question.ended_at,
+        totalVotes,
+        noAnswerCount,
+        ranking,
+      };
+    }),
+  );
+
+  return {
+    game: {
+      id: game.id,
+      title: game.title,
+      pin: game.pin,
+      status: game.status,
+    },
+    participantCount,
+    totalVotes: questions.reduce((sum, q) => sum + q.totalVotes, 0),
+    questions,
+  };
+}
+
 export async function getGameLiveStats(gameId: string, requesterId: string) {
   const game = await getGame(gameId, requesterId);
   const participantCount = await getParticipantCount(gameId);
   if (!game.current_session_id) {
-    return { participantCount, joinedCount: participantCount, votedCount: 0, waitingCount: participantCount, optionCounts: {} };
+    return {
+      participantCount,
+      joinedCount: participantCount,
+      votedCount: 0,
+      waitingCount: participantCount,
+      optionCounts: {},
+    };
   }
-  const current = game.questions.find((q: any) => q.id === game.current_session_id);
-  if (!current) return { participantCount, joinedCount: participantCount, votedCount: 0, waitingCount: participantCount, optionCounts: {} };
+  const current = game.questions.find(
+    (q: any) => q.id === game.current_session_id,
+  );
+  if (!current)
+    return {
+      participantCount,
+      joinedCount: participantCount,
+      votedCount: 0,
+      waitingCount: participantCount,
+      optionCounts: {},
+    };
 
   const { data: selections, error } = await supabaseAdmin
-    .from("selections").select("user_id,option_id").eq("session_id", current.id);
+    .from("selections")
+    .select("user_id,option_id")
+    .eq("session_id", current.id);
   if (error) throw error;
 
   const optionCounts: Record<string, number> = {};
@@ -405,7 +585,6 @@ export async function getGameLiveStats(gameId: string, requesterId: string) {
     currentSessionId: current.id,
   };
 }
-
 
 export async function getGameDashboard(gameId: string, requesterId: string) {
   const game = await getGame(gameId, requesterId);
@@ -427,90 +606,125 @@ export async function getGameDashboard(gameId: string, requesterId: string) {
   const participantCount = participants.length;
   const participantMap = new Map(participants.map((p: any) => [p.userId, p]));
 
-  const questionDashboards = await Promise.all((game.questions ?? []).map(async (question: any) => {
-    const [{ data: options, error: optionsError }, { data: votes, error: votesError }] = await Promise.all([
-      supabaseAdmin.from("options").select("id,label,sort_order").eq("session_id", question.id).order("sort_order", { ascending: true }),
-      supabaseAdmin.from("votes").select("user_id,option_id,finalized_at").eq("session_id", question.id).order("finalized_at", { ascending: true }),
-    ]);
-    if (optionsError) throw optionsError;
-    if (votesError) throw votesError;
+  const questionDashboards = await Promise.all(
+    (game.questions ?? []).map(async (question: any) => {
+      const [
+        { data: options, error: optionsError },
+        { data: votes, error: votesError },
+      ] = await Promise.all([
+        supabaseAdmin
+          .from("options")
+          .select("id,label,sort_order")
+          .eq("session_id", question.id)
+          .order("sort_order", { ascending: true }),
+        supabaseAdmin
+          .from("votes")
+          .select("user_id,option_id,finalized_at")
+          .eq("session_id", question.id)
+          .order("finalized_at", { ascending: true }),
+      ]);
+      if (optionsError) throw optionsError;
+      if (votesError) throw votesError;
 
-    const counts: Record<string, number> = {};
-    for (const option of options ?? []) counts[option.id] = 0;
+      const counts: Record<string, number> = {};
+      for (const option of options ?? []) counts[option.id] = 0;
 
-    const voteByUser = new Map<string, any>((votes ?? []).map((v: any) => [v.user_id, v]));
-    const cutoff = question.started_at ? new Date(question.started_at).getTime() : Number.POSITIVE_INFINITY;
-    const expectedParticipants = participants.filter((p: any) => new Date(p.joinedAt).getTime() <= cutoff);
+      const voteByUser = new Map<string, any>(
+        (votes ?? []).map((v: any) => [v.user_id, v]),
+      );
+      const cutoff = question.started_at
+        ? new Date(question.started_at).getTime()
+        : Number.POSITIVE_INFINITY;
+      const expectedParticipants = participants.filter(
+        (p: any) => new Date(p.joinedAt).getTime() <= cutoff,
+      );
 
-    let noAnswerCount = 0;
-    const history: any[] = [];
+      let noAnswerCount = 0;
+      const history: any[] = [];
 
-    for (const participant of expectedParticipants) {
-      const vote = voteByUser.get(participant.userId);
-      const option = vote?.option_id ? (options ?? []).find((item: any) => item.id === vote.option_id) : null;
+      for (const participant of expectedParticipants) {
+        const vote = voteByUser.get(participant.userId);
+        const option = vote?.option_id
+          ? (options ?? []).find((item: any) => item.id === vote.option_id)
+          : null;
 
-      if (vote?.option_id) {
-        counts[vote.option_id] = (counts[vote.option_id] ?? 0) + 1;
-      } else {
-        noAnswerCount += 1;
+        if (vote?.option_id) {
+          counts[vote.option_id] = (counts[vote.option_id] ?? 0) + 1;
+        } else {
+          noAnswerCount += 1;
+        }
+
+        history.push({
+          questionId: question.id,
+          questionNumber: question.sort_order,
+          question: question.question,
+          userId: participant.userId,
+          displayName: participant.displayName,
+          optionId: vote?.option_id ?? null,
+          optionLabel: option?.label ?? "Không chọn",
+          timestamp:
+            vote?.finalized_at ?? question.ended_at ?? participant.joinedAt,
+        });
       }
 
-      history.push({
+      // Safety net for legacy vote rows whose user is not present in game_participants.
+      for (const vote of votes ?? []) {
+        if (participantMap.has(vote.user_id)) continue;
+        const option = vote.option_id
+          ? (options ?? []).find((item: any) => item.id === vote.option_id)
+          : null;
+        if (vote.option_id)
+          counts[vote.option_id] = (counts[vote.option_id] ?? 0) + 1;
+        else noAnswerCount += 1;
+        history.push({
+          questionId: question.id,
+          questionNumber: question.sort_order,
+          question: question.question,
+          userId: vote.user_id,
+          displayName: "Người chơi",
+          optionId: vote.option_id,
+          optionLabel: option?.label ?? "Không chọn",
+          timestamp:
+            vote.finalized_at ?? question.ended_at ?? new Date().toISOString(),
+        });
+      }
+
+      const ranking = (options ?? [])
+        .map((option: any) => ({
+          optionId: option.id,
+          label: option.label,
+          votes: counts[option.id] ?? 0,
+        }))
+        .sort((a: any, b: any) => b.votes - a.votes);
+
+      return {
         questionId: question.id,
         questionNumber: question.sort_order,
         question: question.question,
-        userId: participant.userId,
-        displayName: participant.displayName,
-        optionId: vote?.option_id ?? null,
-        optionLabel: option?.label ?? "Không chọn",
-        timestamp: vote?.finalized_at ?? question.ended_at ?? participant.joinedAt,
-      });
-    }
-
-    // Safety net for legacy vote rows whose user is not present in game_participants.
-    for (const vote of votes ?? []) {
-      if (participantMap.has(vote.user_id)) continue;
-      const option = vote.option_id ? (options ?? []).find((item: any) => item.id === vote.option_id) : null;
-      if (vote.option_id) counts[vote.option_id] = (counts[vote.option_id] ?? 0) + 1;
-      else noAnswerCount += 1;
-      history.push({
-        questionId: question.id,
-        questionNumber: question.sort_order,
-        question: question.question,
-        userId: vote.user_id,
-        displayName: "Người chơi",
-        optionId: vote.option_id,
-        optionLabel: option?.label ?? "Không chọn",
-        timestamp: vote.finalized_at ?? question.ended_at ?? new Date().toISOString(),
-      });
-    }
-
-    const ranking = (options ?? [])
-      .map((option: any) => ({
-        optionId: option.id,
-        label: option.label,
-        votes: counts[option.id] ?? 0,
-      }))
-      .sort((a: any, b: any) => b.votes - a.votes);
-
-    return {
-      questionId: question.id,
-      questionNumber: question.sort_order,
-      question: question.question,
-      status: question.status,
-      startedAt: question.started_at,
-      endedAt: question.ended_at,
-      totalVotes: Object.values(counts).reduce((sum: number, value: any) => sum + Number(value || 0), 0),
-      noAnswerCount,
-      ranking,
-      history,
-    };
-  }));
+        status: question.status,
+        startedAt: question.started_at,
+        endedAt: question.ended_at,
+        totalVotes: Object.values(counts).reduce(
+          (sum: number, value: any) => sum + Number(value || 0),
+          0,
+        ),
+        noAnswerCount,
+        ranking,
+        history,
+      };
+    }),
+  );
 
   const voteHistory = questionDashboards
     .flatMap((q: any) => q.history)
-    .sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-  const totalVotes = questionDashboards.reduce((sum: number, q: any) => sum + q.totalVotes, 0);
+    .sort(
+      (a: any, b: any) =>
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+    );
+  const totalVotes = questionDashboards.reduce(
+    (sum: number, q: any) => sum + q.totalVotes,
+    0,
+  );
 
   return {
     game: {
@@ -522,7 +736,10 @@ export async function getGameDashboard(gameId: string, requesterId: string) {
       updatedAt: game.updated_at,
     },
     participantCount,
-    participants: participants.map(({ userId, ...p }: any) => ({ ...p, userId })),
+    participants: participants.map(({ userId, ...p }: any) => ({
+      ...p,
+      userId,
+    })),
     totalVotes,
     questions: questionDashboards,
     voteHistory,
@@ -530,7 +747,12 @@ export async function getGameDashboard(gameId: string, requesterId: string) {
   };
 }
 
-export async function getQuestionVoters(gameId: string, requesterId: string, questionId: string, optionId?: string) {
+export async function getQuestionVoters(
+  gameId: string,
+  requesterId: string,
+  questionId: string,
+  optionId?: string,
+) {
   const game = await getGame(gameId, requesterId);
   const question = game.questions.find((q: any) => q.id === questionId);
   if (!question) throw new Error("question_not_found");
@@ -540,21 +762,31 @@ export async function getQuestionVoters(gameId: string, requesterId: string, que
     .select("user_id,display_name,joined_at")
     .eq("game_id", gameId);
   if (pError) throw pError;
-  const names = new Map((participants ?? []).map((p: any) => [p.user_id, p.display_name]));
+  const names = new Map(
+    (participants ?? []).map((p: any) => [p.user_id, p.display_name]),
+  );
 
   const source = question.status === "active" ? "selections" : "votes";
   const { data: rows, error } = await supabaseAdmin
     .from(source)
     .select("user_id,option_id,updated_at,finalized_at")
     .eq("session_id", questionId)
-    .order(source === "selections" ? "updated_at" : "finalized_at", { ascending: true });
+    .order(source === "selections" ? "updated_at" : "finalized_at", {
+      ascending: true,
+    });
   if (error) throw error;
 
-  const filtered = optionId ? (rows ?? []).filter((v: any) => v.option_id === optionId) : (rows ?? []);
+  const filtered = optionId
+    ? (rows ?? []).filter((v: any) => v.option_id === optionId)
+    : (rows ?? []);
   return filtered.map((v: any) => ({
     userId: v.user_id,
     displayName: names.get(v.user_id) ?? "Người chơi",
     optionId: v.option_id,
-    timestamp: v.updated_at ?? v.finalized_at ?? question.ended_at ?? new Date().toISOString(),
+    timestamp:
+      v.updated_at ??
+      v.finalized_at ??
+      question.ended_at ??
+      new Date().toISOString(),
   }));
 }

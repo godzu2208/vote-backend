@@ -315,6 +315,21 @@ export async function joinGame(gameId: string, userId: string, displayName: stri
   return { ok: true };
 }
 
+export async function getGameParticipants(gameId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("game_participants")
+    .select("id,user_id,display_name,joined_at,last_seen_at")
+    .eq("game_id", gameId)
+    .order("joined_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((p: any) => ({
+    id: p.id,
+    displayName: p.display_name,
+    joinedAt: p.joined_at,
+    lastSeenAt: p.last_seen_at,
+  }));
+}
+
 export async function getParticipantCount(gameId: string) {
   const { count, error } = await supabaseAdmin
     .from("game_participants")

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authMiddleware, requireAdmin } from "../middleware/auth";
 import {
   createGame, updateGame, listGames, getGame, getGameByPin, joinGame,
-  getParticipantCount, enterLobby, startGame, advanceGame, closeGame,
+  getParticipantCount, getGameParticipants, enterLobby, startGame, advanceGame, closeGame,
   getGameLiveStats, getGameDashboard, getQuestionVoters,
 } from "../services/gameService";
 
@@ -79,6 +79,11 @@ router.post("/games/:id/join", authMiddleware, async (req, res) => {
     console.error("[POST /games/:id/join]", err);
     return res.status(500).json({ error: "internal_error" });
   }
+});
+
+router.get("/games/:id/participants", authMiddleware, requireAdmin, async (req, res) => {
+  try { return res.json({ participants: await getGameParticipants(req.params.id) }); }
+  catch (err) { console.error("[GET /games/:id/participants]", err); return res.status(500).json({ error: "internal_error" }); }
 });
 
 router.get("/games/:id/participants/count", authMiddleware, async (req, res) => {

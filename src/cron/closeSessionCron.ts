@@ -2,7 +2,7 @@ import { supabaseAdmin } from "../config/supabaseAdmin";
 import { closeSession } from "../services/voteService";
 
 const CHECK_INTERVAL_MS =
-  Number(process.env.SESSION_CLOSE_CHECK_INTERVAL_MS) || 2000;
+  Number(process.env.SESSION_CLOSE_CHECK_INTERVAL_MS) || 1000;
 
 /**
  * Dùng setInterval thuần thay vì thư viện cron, vì cần chu kỳ ngắn (vài giây)

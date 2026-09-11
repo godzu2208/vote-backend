@@ -22,6 +22,8 @@ interface CreateSessionParams {
   joinCode?: string | null;
 }
 
+const SELECTION_GRACE_MS = Number(process.env.SELECTION_GRACE_MS) || 3000;
+
 // Bộ ký tự dùng để tự sinh mã - bỏ 0/O và 1/I/L để tránh nhầm lẫn khi đọc to / nhập tay.
 const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
@@ -109,14 +111,15 @@ export async function upsertSelection({
 
   if (sessionError) throw sessionError;
 
-  const isPastDeadline = session?.ended_at
-    ? new Date(session.ended_at).getTime() <= Date.now()
-    : false;
+  const endedAtMs = session?.ended_at
+    ? new Date(session.ended_at).getTime()
+    : null;
+  const isPastDeadline =
+    endedAtMs != null ? Date.now() > endedAtMs + SELECTION_GRACE_MS : false;
 
-  // Kiểm tra CẢ status lẫn ended_at: việc khóa (/session/:id/close) do trang admin
-  // chủ động gọi khi countdown về 0, không có tiến trình nền nào tự khóa hộ.
-  // Nếu admin gọi trễ vài giây (mạng chậm, thao tác chậm), server vẫn tự chặn ghi mới
-  // ngay khi qua deadline thật, không phụ thuộc vào việc status đã kịp chuyển 'closed' hay chưa.
+  // Giữ một khoảng grace ngắn sau deadline để tránh trường hợp client/admin
+  // không hoàn toàn đồng bộ về thời gian. Điều này giảm đáng kể các trường hợp
+  // user bấm đúng lúc nhưng bị từ chối vì clock lệch ~1-2 giây.
   if (!session || session.status !== "active" || isPastDeadline) {
     const err: any = new Error("session_not_active");
     err.code = "session_not_active";
@@ -195,13 +198,10 @@ export async function startSession(sessionId: string, durationSeconds: number) {
   }
 
   if (current.status === "closed") {
-    const { error: restartError } = await supabaseAdmin.rpc(
-      "restart_session",
-      {
-        p_session_id: sessionId,
-        p_duration_seconds: durationSeconds,
-      },
-    );
+    const { error: restartError } = await supabaseAdmin.rpc("restart_session", {
+      p_session_id: sessionId,
+      p_duration_seconds: durationSeconds,
+    });
     if (restartError) throw restartError;
     return;
   }
@@ -350,18 +350,20 @@ export async function getJoinedCount(sessionId: string) {
 }
 
 export async function getLiveStats(sessionId: string) {
-  const [{ data: joins, error: joinsError }, { data: selections, error: selectionsError }] =
-    await Promise.all([
-      supabaseAdmin
-        .from("vote_logs")
-        .select("user_id")
-        .eq("session_id", sessionId)
-        .eq("action", "join"),
-      supabaseAdmin
-        .from("selections")
-        .select("user_id, option_id")
-        .eq("session_id", sessionId),
-    ]);
+  const [
+    { data: joins, error: joinsError },
+    { data: selections, error: selectionsError },
+  ] = await Promise.all([
+    supabaseAdmin
+      .from("vote_logs")
+      .select("user_id")
+      .eq("session_id", sessionId)
+      .eq("action", "join"),
+    supabaseAdmin
+      .from("selections")
+      .select("user_id, option_id")
+      .eq("session_id", sessionId),
+  ]);
 
   if (joinsError) throw joinsError;
   if (selectionsError) throw selectionsError;

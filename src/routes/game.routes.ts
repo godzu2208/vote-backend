@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { authMiddleware, requireAdmin } from "../middleware/auth";
 import {
-  createGame, listGames, getGame, getGameByPin, joinGame,
+  createGame, updateGame, listGames, getGame, getGameByPin, joinGame,
   getParticipantCount, enterLobby, startGame, advanceGame, closeGame,
   getGameLiveStats, getQuestionVoters,
 } from "../services/gameService";
@@ -39,6 +39,23 @@ router.get("/games/pin/:pin", authMiddleware, async (req, res) => {
     if (!game) return res.status(404).json({ error: "not_found", message: "Không tìm thấy Game." });
     return res.json({ game });
   } catch (err) { console.error("[GET /games/pin/:pin]", err); return res.status(500).json({ error: "internal_error" }); }
+});
+
+router.put("/games/:id", authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const game = await updateGame(req.params.id, req.user!.id, req.body ?? {});
+    return res.json({ ok: true, game });
+  } catch (err: any) {
+    const code = err?.code;
+    if (["invalid_title","invalid_questions","invalid_question","invalid_options","invalid_duration"].includes(code)) {
+      return res.status(400).json({ error: code, message: "Dữ liệu Game không hợp lệ." });
+    }
+    if (code === "game_not_editable") {
+      return res.status(409).json({ error: code, message: "Game này không còn ở trạng thái có thể chỉnh sửa." });
+    }
+    console.error("[PUT /games/:id]", err);
+    return res.status(500).json({ error: "internal_error" });
+  }
 });
 
 router.get("/games/:id", authMiddleware, async (req, res) => {

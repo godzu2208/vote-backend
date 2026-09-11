@@ -140,6 +140,110 @@ export async function createGame(createdBy: string, input: CreateGameInput) {
   return getGame(game.id, createdBy);
 }
 
+
+export async function updateGame(gameId: string, requesterId: string, input: CreateGameInput) {
+  const existing = await getGame(gameId, requesterId);
+  if (existing.status !== "draft") {
+    throw Object.assign(new Error("game_not_editable"), { code: "game_not_editable" });
+  }
+
+  const title = input.title?.trim();
+  if (!title) throw Object.assign(new Error("invalid_title"), { code: "invalid_title" });
+  if (!Array.isArray(input.questions) || input.questions.length < 1) {
+    throw Object.assign(new Error("invalid_questions"), { code: "invalid_questions" });
+  }
+
+  const questions = input.questions.map(normalizeQuestion);
+
+  const { error: gameError } = await supabaseAdmin
+    .from("games")
+    .update({
+      title,
+      cover_url: input.coverUrl?.trim() || null,
+      background_type: input.backgroundType ?? "gradient",
+      background_value: input.backgroundValue?.trim() || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", gameId)
+    .eq("created_by", requesterId);
+  if (gameError) throw gameError;
+
+  const existingSessions = existing.questions ?? [];
+
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];
+    const old = existingSessions[i];
+
+    let sessionId: string;
+    if (old) {
+      const { error } = await supabaseAdmin
+        .from("sessions")
+        .update({
+          question: q.question,
+          duration_seconds: q.durationSeconds,
+          sort_order: q.sortOrder,
+          background_type: q.backgroundType,
+          background_value: q.backgroundValue,
+          image_url: q.imageUrl,
+        })
+        .eq("id", old.id)
+        .eq("game_id", gameId);
+      if (error) throw error;
+      sessionId = old.id;
+
+      const { error: deleteOptionsError } = await supabaseAdmin
+        .from("options")
+        .delete()
+        .eq("session_id", sessionId);
+      if (deleteOptionsError) throw deleteOptionsError;
+    } else {
+      const { data: session, error } = await supabaseAdmin
+        .from("sessions")
+        .insert({
+          question: q.question,
+          status: "pending",
+          game_id: gameId,
+          sort_order: q.sortOrder,
+          duration_seconds: q.durationSeconds,
+          background_type: q.backgroundType,
+          background_value: q.backgroundValue,
+          image_url: q.imageUrl,
+        })
+        .select("id")
+        .single();
+      if (error) throw error;
+      sessionId = session.id;
+    }
+
+    const { error: optionError } = await supabaseAdmin.from("options").insert(
+      q.options.map((label, optionIndex) => ({
+        session_id: sessionId,
+        label,
+        sort_order: optionIndex + 1,
+      }))
+    );
+    if (optionError) throw optionError;
+  }
+
+  for (let i = questions.length; i < existingSessions.length; i++) {
+    const old = existingSessions[i];
+    const { error: deleteOptionsError } = await supabaseAdmin
+      .from("options")
+      .delete()
+      .eq("session_id", old.id);
+    if (deleteOptionsError) throw deleteOptionsError;
+
+    const { error: deleteSessionError } = await supabaseAdmin
+      .from("sessions")
+      .delete()
+      .eq("id", old.id)
+      .eq("game_id", gameId);
+    if (deleteSessionError) throw deleteSessionError;
+  }
+
+  return getGame(gameId, requesterId);
+}
+
 export async function listGames(createdBy: string) {
   const { data: games, error } = await supabaseAdmin
     .from("games")
@@ -344,8 +448,21 @@ export async function getQuestionVoters(gameId: string, requesterId: string, que
     .eq("game_id", gameId);
   if (pError) throw pError;
 
+  const { data: question, error: qError } = await supabaseAdmin
+    .from("sessions")
+    .select("status")
+    .eq("id", questionId)
+    .eq("game_id", gameId)
+    .single();
+  if (qError) throw qError;
+
+  // During an active round, selections is the live mutable state.
+  // After the round is closed, votes is the finalized state.
+  const sourceTable = question.status === "active" ? "selections" : "votes";
   const { data: votes, error: vError } = await supabaseAdmin
-    .from("votes").select("user_id,option_id").eq("session_id", questionId);
+    .from(sourceTable)
+    .select("user_id,option_id")
+    .eq("session_id", questionId);
   if (vError) throw vError;
 
   const filtered = optionId

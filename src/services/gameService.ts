@@ -143,8 +143,14 @@ export async function createGame(createdBy: string, input: CreateGameInput) {
 
 export async function updateGame(gameId: string, requesterId: string, input: CreateGameInput) {
   const existing = await getGame(gameId, requesterId);
-  if (existing.status !== "draft") {
+  if (!['draft', 'lobby'].includes(existing.status)) {
     throw Object.assign(new Error("game_not_editable"), { code: "game_not_editable" });
+  }
+  if (existing.status === 'lobby') {
+    const participants = await getParticipantCount(gameId);
+    if (participants > 0) {
+      throw Object.assign(new Error("game_lobby_has_participants"), { code: "game_lobby_has_participants" });
+    }
   }
 
   const title = input.title?.trim();
@@ -437,6 +443,97 @@ export async function getGameLiveStats(gameId: string, requesterId: string) {
     waitingCount: Math.max(0, participantCount - voted.size),
     optionCounts,
     currentSessionId: current.id,
+  };
+}
+
+
+export async function getGameDashboard(gameId: string, requesterId: string) {
+  const game = await getGame(gameId, requesterId);
+  const participantCount = await getParticipantCount(gameId);
+
+  const participantResult = await supabaseAdmin
+    .from("game_participants")
+    .select("joined_at")
+    .eq("game_id", gameId)
+    .order("joined_at", { ascending: true });
+  if (participantResult.error) throw participantResult.error;
+
+  const questionDashboards = await Promise.all((game.questions ?? []).map(async (question: any) => {
+    const [{ data: options, error: optionsError }, { data: votes, error: votesError }] = await Promise.all([
+      supabaseAdmin.from("options").select("id,label,sort_order").eq("session_id", question.id).order("sort_order", { ascending: true }),
+      supabaseAdmin.from("votes").select("option_id,finalized_at").eq("session_id", question.id).order("finalized_at", { ascending: true }),
+    ]);
+    if (optionsError) throw optionsError;
+    if (votesError) throw votesError;
+
+    const counts: Record<string, number> = {};
+    for (const option of options ?? []) counts[option.id] = 0;
+    let noAnswerCount = 0;
+    const history = (votes ?? []).map((vote: any) => {
+      if (!vote.option_id) {
+        noAnswerCount += 1;
+        return {
+          questionId: question.id,
+          questionNumber: question.sort_order,
+          question: question.question,
+          optionId: null,
+          optionLabel: "Không chọn",
+          timestamp: vote.finalized_at,
+        };
+      }
+      counts[vote.option_id] = (counts[vote.option_id] ?? 0) + 1;
+      const option = (options ?? []).find((item: any) => item.id === vote.option_id);
+      return {
+        questionId: question.id,
+        questionNumber: question.sort_order,
+        question: question.question,
+        optionId: vote.option_id,
+        optionLabel: option?.label ?? "Đáp án",
+        timestamp: vote.finalized_at,
+      };
+    });
+
+    const ranking = (options ?? [])
+      .map((option: any) => ({
+        optionId: option.id,
+        label: option.label,
+        votes: counts[option.id] ?? 0,
+      }))
+      .sort((a: any, b: any) => b.votes - a.votes);
+
+    return {
+      questionId: question.id,
+      questionNumber: question.sort_order,
+      question: question.question,
+      status: question.status,
+      startedAt: question.started_at,
+      endedAt: question.ended_at,
+      totalVotes: (votes ?? []).filter((v: any) => v.option_id).length,
+      noAnswerCount,
+      ranking,
+      history,
+    };
+  }));
+
+  const voteHistory = questionDashboards
+    .flatMap((q: any) => q.history)
+    .sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  const totalVotes = questionDashboards.reduce((sum: number, q: any) => sum + q.totalVotes, 0);
+
+  return {
+    game: {
+      id: game.id,
+      title: game.title,
+      pin: game.pin,
+      status: game.status,
+      createdAt: game.created_at,
+      updatedAt: game.updated_at,
+    },
+    participantCount,
+    totalVotes,
+    questions: questionDashboards,
+    voteHistory,
+    participantJoinTimestamps: (participantResult.data ?? []).map((p: any) => p.joined_at),
   };
 }
 

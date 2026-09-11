@@ -3,7 +3,7 @@ import { authMiddleware, requireAdmin } from "../middleware/auth";
 import {
   createGame, updateGame, listGames, getGame, getGameByPin, joinGame,
   getParticipantCount, enterLobby, startGame, advanceGame, closeGame,
-  getGameLiveStats, getQuestionVoters,
+  getGameLiveStats, getGameDashboard, getQuestionVoters,
 } from "../services/gameService";
 
 const router = Router();
@@ -50,8 +50,8 @@ router.put("/games/:id", authMiddleware, requireAdmin, async (req, res) => {
     if (["invalid_title","invalid_questions","invalid_question","invalid_options","invalid_duration"].includes(code)) {
       return res.status(400).json({ error: code, message: "Dữ liệu Game không hợp lệ." });
     }
-    if (code === "game_not_editable") {
-      return res.status(409).json({ error: code, message: "Game này không còn ở trạng thái có thể chỉnh sửa." });
+    if (code === "game_not_editable" || code === "game_lobby_has_participants") {
+      return res.status(409).json({ error: code, message: code === "game_lobby_has_participants" ? "Game đang có người tham gia nên không thể chỉnh sửa câu hỏi." : "Game này đã bắt đầu hoặc kết thúc nên không thể chỉnh sửa." });
     }
     console.error("[PUT /games/:id]", err);
     return res.status(500).json({ error: "internal_error" });
@@ -104,6 +104,11 @@ router.post("/games/:id/next", authMiddleware, requireAdmin, async (req, res) =>
 router.post("/games/:id/close", authMiddleware, requireAdmin, async (req, res) => {
   try { return res.json({ ok: true, game: await closeGame(req.params.id, req.user!.id) }); }
   catch (err) { console.error("[POST /games/:id/close]", err); return res.status(500).json({ error: "internal_error" }); }
+});
+
+router.get("/games/:id/dashboard", authMiddleware, requireAdmin, async (req, res) => {
+  try { return res.json(await getGameDashboard(req.params.id, req.user!.id)); }
+  catch (err) { console.error("[GET /games/:id/dashboard]", err); return res.status(500).json({ error: "internal_error" }); }
 });
 
 router.get("/games/:id/stats", authMiddleware, requireAdmin, async (req, res) => {

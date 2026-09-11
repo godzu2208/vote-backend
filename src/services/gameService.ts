@@ -464,49 +464,81 @@ export async function getGameLiveStats(gameId: string, requesterId: string) {
 
 export async function getGameDashboard(gameId: string, requesterId: string) {
   const game = await getGame(gameId, requesterId);
-  const participantCount = await getParticipantCount(gameId);
 
   const participantResult = await supabaseAdmin
     .from("game_participants")
-    .select("joined_at")
+    .select("id,user_id,display_name,joined_at,last_seen_at")
     .eq("game_id", gameId)
     .order("joined_at", { ascending: true });
   if (participantResult.error) throw participantResult.error;
 
+  const participants = (participantResult.data ?? []).map((p: any) => ({
+    id: p.id,
+    userId: p.user_id,
+    displayName: p.display_name,
+    joinedAt: p.joined_at,
+    lastSeenAt: p.last_seen_at,
+  }));
+  const participantCount = participants.length;
+  const participantMap = new Map(participants.map((p: any) => [p.userId, p]));
+
   const questionDashboards = await Promise.all((game.questions ?? []).map(async (question: any) => {
     const [{ data: options, error: optionsError }, { data: votes, error: votesError }] = await Promise.all([
       supabaseAdmin.from("options").select("id,label,sort_order").eq("session_id", question.id).order("sort_order", { ascending: true }),
-      supabaseAdmin.from("votes").select("option_id,finalized_at").eq("session_id", question.id).order("finalized_at", { ascending: true }),
+      supabaseAdmin.from("votes").select("user_id,option_id,finalized_at").eq("session_id", question.id).order("finalized_at", { ascending: true }),
     ]);
     if (optionsError) throw optionsError;
     if (votesError) throw votesError;
 
     const counts: Record<string, number> = {};
     for (const option of options ?? []) counts[option.id] = 0;
+
+    const voteByUser = new Map<string, any>((votes ?? []).map((v: any) => [v.user_id, v]));
+    const cutoff = question.started_at ? new Date(question.started_at).getTime() : Number.POSITIVE_INFINITY;
+    const expectedParticipants = participants.filter((p: any) => new Date(p.joinedAt).getTime() <= cutoff);
+
     let noAnswerCount = 0;
-    const history = (votes ?? []).map((vote: any) => {
-      if (!vote.option_id) {
+    const history: any[] = [];
+
+    for (const participant of expectedParticipants) {
+      const vote = voteByUser.get(participant.userId);
+      const option = vote?.option_id ? (options ?? []).find((item: any) => item.id === vote.option_id) : null;
+
+      if (vote?.option_id) {
+        counts[vote.option_id] = (counts[vote.option_id] ?? 0) + 1;
+      } else {
         noAnswerCount += 1;
-        return {
-          questionId: question.id,
-          questionNumber: question.sort_order,
-          question: question.question,
-          optionId: null,
-          optionLabel: "Không chọn",
-          timestamp: vote.finalized_at,
-        };
       }
-      counts[vote.option_id] = (counts[vote.option_id] ?? 0) + 1;
-      const option = (options ?? []).find((item: any) => item.id === vote.option_id);
-      return {
+
+      history.push({
         questionId: question.id,
         questionNumber: question.sort_order,
         question: question.question,
+        userId: participant.userId,
+        displayName: participant.displayName,
+        optionId: vote?.option_id ?? null,
+        optionLabel: option?.label ?? "Không chọn",
+        timestamp: vote?.finalized_at ?? question.ended_at ?? participant.joinedAt,
+      });
+    }
+
+    // Safety net for legacy vote rows whose user is not present in game_participants.
+    for (const vote of votes ?? []) {
+      if (participantMap.has(vote.user_id)) continue;
+      const option = vote.option_id ? (options ?? []).find((item: any) => item.id === vote.option_id) : null;
+      if (vote.option_id) counts[vote.option_id] = (counts[vote.option_id] ?? 0) + 1;
+      else noAnswerCount += 1;
+      history.push({
+        questionId: question.id,
+        questionNumber: question.sort_order,
+        question: question.question,
+        userId: vote.user_id,
+        displayName: "Người chơi",
         optionId: vote.option_id,
-        optionLabel: option?.label ?? "Đáp án",
-        timestamp: vote.finalized_at,
-      };
-    });
+        optionLabel: option?.label ?? "Không chọn",
+        timestamp: vote.finalized_at ?? question.ended_at ?? new Date().toISOString(),
+      });
+    }
 
     const ranking = (options ?? [])
       .map((option: any) => ({
@@ -523,7 +555,7 @@ export async function getGameDashboard(gameId: string, requesterId: string) {
       status: question.status,
       startedAt: question.started_at,
       endedAt: question.ended_at,
-      totalVotes: (votes ?? []).filter((v: any) => v.option_id).length,
+      totalVotes: Object.values(counts).reduce((sum: number, value: any) => sum + Number(value || 0), 0),
       noAnswerCount,
       ranking,
       history,
@@ -545,46 +577,39 @@ export async function getGameDashboard(gameId: string, requesterId: string) {
       updatedAt: game.updated_at,
     },
     participantCount,
+    participants: participants.map(({ userId, ...p }: any) => ({ ...p, userId })),
     totalVotes,
     questions: questionDashboards,
     voteHistory,
-    participantJoinTimestamps: (participantResult.data ?? []).map((p: any) => p.joined_at),
+    participantJoinTimestamps: participants.map((p: any) => p.joinedAt),
   };
 }
 
 export async function getQuestionVoters(gameId: string, requesterId: string, questionId: string, optionId?: string) {
-  await getGame(gameId, requesterId);
+  const game = await getGame(gameId, requesterId);
+  const question = game.questions.find((q: any) => q.id === questionId);
+  if (!question) throw new Error("question_not_found");
+
   const { data: participants, error: pError } = await supabaseAdmin
     .from("game_participants")
     .select("user_id,display_name,joined_at")
     .eq("game_id", gameId);
   if (pError) throw pError;
+  const names = new Map((participants ?? []).map((p: any) => [p.user_id, p.display_name]));
 
-  const { data: question, error: qError } = await supabaseAdmin
-    .from("sessions")
-    .select("status")
-    .eq("id", questionId)
-    .eq("game_id", gameId)
-    .single();
-  if (qError) throw qError;
+  const source = question.status === "active" ? "selections" : "votes";
+  const { data: rows, error } = await supabaseAdmin
+    .from(source)
+    .select("user_id,option_id,updated_at,finalized_at")
+    .eq("session_id", questionId)
+    .order(source === "selections" ? "updated_at" : "finalized_at", { ascending: true });
+  if (error) throw error;
 
-  // During an active round, selections is the live mutable state.
-  // After the round is closed, votes is the finalized state.
-  const sourceTable = question.status === "active" ? "selections" : "votes";
-  const { data: votes, error: vError } = await supabaseAdmin
-    .from(sourceTable)
-    .select("user_id,option_id")
-    .eq("session_id", questionId);
-  if (vError) throw vError;
-
-  const filtered = optionId
-    ? (votes ?? []).filter((v) => v.option_id === optionId)
-    : (votes ?? []);
-
-  const names = new Map((participants ?? []).map((p) => [p.user_id, p.display_name]));
-  return filtered.map((v) => ({
+  const filtered = optionId ? (rows ?? []).filter((v: any) => v.option_id === optionId) : (rows ?? []);
+  return filtered.map((v: any) => ({
     userId: v.user_id,
     displayName: names.get(v.user_id) ?? "Người chơi",
     optionId: v.option_id,
+    timestamp: v.updated_at ?? v.finalized_at ?? question.ended_at ?? new Date().toISOString(),
   }));
 }

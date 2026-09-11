@@ -3,7 +3,7 @@ import { authMiddleware, requireAdmin } from "../middleware/auth";
 import {
   createGame, updateGame, listGames, getGame, getGameByPin, joinGame,
   getParticipantCount, getGameParticipants, enterLobby, startGame, advanceGame, closeGame,
-  getGameLiveStats, getGameDashboard, getQuestionVoters,
+  getGameLiveStats, getGameDashboard, getGamePublicResults, getQuestionVoters,
 } from "../services/gameService";
 
 const router = Router();
@@ -112,6 +112,15 @@ router.post("/games/:id/next", authMiddleware, requireAdmin, async (req, res) =>
 router.post("/games/:id/close", authMiddleware, requireAdmin, async (req, res) => {
   try { return res.json({ ok: true, game: await closeGame(req.params.id, req.user!.id) }); }
   catch (err) { console.error("[POST /games/:id/close]", err); return res.status(500).json({ error: "internal_error" }); }
+});
+
+router.get("/games/:id/results", authMiddleware, async (req, res) => {
+  try {
+    return res.json(await getGamePublicResults(req.params.id));
+  } catch (err) {
+    console.error("[GET /games/:id/results]", err);
+    return res.status(404).json({ error: "not_found", message: "Không tìm thấy kết quả Game." });
+  }
 });
 
 router.get("/games/:id/dashboard", authMiddleware, requireAdmin, async (req, res) => {

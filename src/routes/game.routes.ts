@@ -15,7 +15,7 @@ router.post("/games", authMiddleware, requireAdmin, async (req, res) => {
     return res.status(201).json({ ok: true, game });
   } catch (err: any) {
     const code = err?.code;
-    if (["invalid_title","invalid_questions","invalid_question","invalid_options","invalid_duration","invalid_pin"].includes(code)) {
+    if (["invalid_title","invalid_questions","invalid_question","invalid_options","invalid_duration","invalid_pin","invalid_background_type"].includes(code)) {
       return res.status(400).json({ error: code, message: "Dữ liệu Game không hợp lệ." });
     }
     if (code === "game_pin_taken" || err?.details?.includes?.("games_pin_uidx")) {
@@ -93,7 +93,10 @@ router.get("/games/:id/participants/count", authMiddleware, async (req, res) => 
 
 router.post("/games/:id/lobby", authMiddleware, requireAdmin, async (req, res) => {
   try { return res.json({ ok: true, game: await enterLobby(req.params.id, req.user!.id) }); }
-  catch (err) { console.error("[POST /games/:id/lobby]", err); return res.status(500).json({ error: "internal_error" }); }
+  catch (err: any) {
+    if (["game_has_no_questions","game_not_ready"].includes(err?.code)) return res.status(409).json({ error: err.code, message: "Game chưa sẵn sàng để mở lobby." });
+    console.error("[POST /games/:id/lobby]", err); return res.status(500).json({ error: "internal_error" });
+  }
 });
 
 router.post("/games/:id/start", authMiddleware, requireAdmin, async (req, res) => {

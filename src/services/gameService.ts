@@ -158,95 +158,22 @@ export async function updateGame(gameId: string, requesterId: string, input: Cre
   if (!Array.isArray(input.questions) || input.questions.length < 1) {
     throw Object.assign(new Error("invalid_questions"), { code: "invalid_questions" });
   }
-
   const questions = input.questions.map(normalizeQuestion);
-
-  const { error: gameError } = await supabaseAdmin
-    .from("games")
-    .update({
-      title,
-      cover_url: input.coverUrl?.trim() || null,
-      background_type: input.backgroundType ?? "gradient",
-      background_value: input.backgroundValue?.trim() || null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", gameId)
-    .eq("created_by", requesterId);
-  if (gameError) throw gameError;
-
-  const existingSessions = existing.questions ?? [];
-
-  for (let i = 0; i < questions.length; i++) {
-    const q = questions[i];
-    const old = existingSessions[i];
-
-    let sessionId: string;
-    if (old) {
-      const { error } = await supabaseAdmin
-        .from("sessions")
-        .update({
-          question: q.question,
-          duration_seconds: q.durationSeconds,
-          sort_order: q.sortOrder,
-          background_type: q.backgroundType,
-          background_value: q.backgroundValue,
-          image_url: q.imageUrl,
-        })
-        .eq("id", old.id)
-        .eq("game_id", gameId);
-      if (error) throw error;
-      sessionId = old.id;
-
-      const { error: deleteOptionsError } = await supabaseAdmin
-        .from("options")
-        .delete()
-        .eq("session_id", sessionId);
-      if (deleteOptionsError) throw deleteOptionsError;
-    } else {
-      const { data: session, error } = await supabaseAdmin
-        .from("sessions")
-        .insert({
-          question: q.question,
-          status: "pending",
-          game_id: gameId,
-          sort_order: q.sortOrder,
-          duration_seconds: q.durationSeconds,
-          background_type: q.backgroundType,
-          background_value: q.backgroundValue,
-          image_url: q.imageUrl,
-        })
-        .select("id")
-        .single();
-      if (error) throw error;
-      sessionId = session.id;
-    }
-
-    const { error: optionError } = await supabaseAdmin.from("options").insert(
-      q.options.map((label, optionIndex) => ({
-        session_id: sessionId,
-        label,
-        sort_order: optionIndex + 1,
-      }))
-    );
-    if (optionError) throw optionError;
+  const backgroundType = input.backgroundType ?? "gradient";
+  if (!['color', 'gradient', 'image'].includes(backgroundType)) {
+    throw Object.assign(new Error("invalid_background_type"), { code: "invalid_background_type" });
   }
 
-  for (let i = questions.length; i < existingSessions.length; i++) {
-    const old = existingSessions[i];
-    const { error: deleteOptionsError } = await supabaseAdmin
-      .from("options")
-      .delete()
-      .eq("session_id", old.id);
-    if (deleteOptionsError) throw deleteOptionsError;
-
-    const { error: deleteSessionError } = await supabaseAdmin
-      .from("sessions")
-      .delete()
-      .eq("id", old.id)
-      .eq("game_id", gameId);
-    if (deleteSessionError) throw deleteSessionError;
-  }
-
+  const { error } = await supabaseAdmin.rpc("update_game_atomic", {
+    p_game_id: gameId,
+    p_created_by: requesterId,
+    p_title: title,
+    p_cover_url: input.coverUrl?.trim() || null,
+    p_background_type: backgroundType,
+    p_background_value: input.backgroundValue?.trim() || null,
+    p_questions: questions,
+  });
+  if (error) throw error;
   return getGame(gameId, requesterId);
 }
 
@@ -365,24 +292,42 @@ async function setCurrentQuestion(gameId: string, sessionId: string, status: "ac
 
 export async function enterLobby(gameId: string, requesterId: string) {
   const game = await getGame(gameId, requesterId);
-  if (game.status !== "draft" && game.status !== "closed") {
+  if (!['draft', 'closed', 'lobby'].includes(game.status)) {
     return game;
   }
-  const first = game.questions[0];
-  if (!first) throw Object.assign(new Error("game_has_no_questions"), { code: "game_has_no_questions" });
+  if (!game.questions[0]) {
+    throw Object.assign(new Error("game_has_no_questions"), { code: "game_has_no_questions" });
+  }
 
-  const { error } = await supabaseAdmin
-    .from("games")
-    .update({ status: "lobby", current_session_id: first.id, updated_at: new Date().toISOString() })
-    .eq("id", gameId);
-  if (error) throw error;
+  if (game.status === 'closed') {
+    const { error } = await supabaseAdmin.rpc("reset_game_to_lobby", {
+      p_game_id: gameId,
+      p_created_by: requesterId,
+    });
+    if (error) throw error;
+  } else if (game.status === 'draft') {
+    const { error } = await supabaseAdmin
+      .from("games")
+      .update({ status: "lobby", current_session_id: game.questions[0].id, updated_at: new Date().toISOString() })
+      .eq("id", gameId).eq("created_by", requesterId);
+    if (error) throw error;
+  }
   return getGame(gameId, requesterId);
 }
 
 export async function startGame(gameId: string, requesterId: string) {
   const game = await getGame(gameId, requesterId);
-  if (!["lobby", "closed"].includes(game.status)) {
+  if (!['lobby', 'closed'].includes(game.status)) {
     throw Object.assign(new Error("game_not_ready"), { code: "game_not_ready" });
+  }
+
+  if (game.status === 'closed') {
+    const { error } = await supabaseAdmin.rpc("reset_game_and_start", {
+      p_game_id: gameId,
+      p_created_by: requesterId,
+    });
+    if (error) throw error;
+    return getGame(gameId, requesterId);
   }
 
   const current = game.questions.find((q: any) => q.id === game.current_session_id) ?? game.questions[0];

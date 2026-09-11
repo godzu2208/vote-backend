@@ -214,7 +214,7 @@ export async function getGame(gameId: string, requesterId?: string) {
     return { ...session, options: options ?? [] };
   }));
 
-  return { ...game, questions };
+  return { ...game, server_now: new Date().toISOString(), questions };
 }
 
 export async function getGameByPin(pin: string) {
@@ -527,65 +527,6 @@ export async function getGameDashboard(gameId: string, requesterId: string) {
     questions: questionDashboards,
     voteHistory,
     participantJoinTimestamps: participants.map((p: any) => p.joinedAt),
-  };
-}
-
-
-export async function getGamePublicResults(gameId: string) {
-  const game = await getGame(gameId);
-  const { count: participantCount, error: participantError } = await supabaseAdmin
-    .from("game_participants")
-    .select("id", { count: "exact", head: true })
-    .eq("game_id", gameId);
-  if (participantError) throw participantError;
-
-  const questions = await Promise.all((game.questions ?? []).map(async (question: any) => {
-    const [{ data: options, error: optionsError }, { data: votes, error: votesError }] = await Promise.all([
-      supabaseAdmin.from("options").select("id,label,sort_order").eq("session_id", question.id).order("sort_order", { ascending: true }),
-      supabaseAdmin.from("votes").select("user_id,option_id,finalized_at").eq("session_id", question.id),
-    ]);
-    if (optionsError) throw optionsError;
-    if (votesError) throw votesError;
-
-    const counts: Record<string, number> = {};
-    for (const option of options ?? []) counts[option.id] = 0;
-    let totalVotes = 0;
-    for (const vote of votes ?? []) {
-      if (vote.option_id) {
-        counts[vote.option_id] = (counts[vote.option_id] ?? 0) + 1;
-        totalVotes += 1;
-      }
-    }
-
-    const joinedBeforeQuestion = (await supabaseAdmin
-      .from("game_participants")
-      .select("user_id,joined_at")
-      .eq("game_id", gameId))
-      .data ?? [];
-    const cutoff = question.started_at ? new Date(question.started_at).getTime() : Number.POSITIVE_INFINITY;
-    const expected = joinedBeforeQuestion.filter((p: any) => new Date(p.joined_at).getTime() <= cutoff);
-    const answeredUsers = new Set((votes ?? []).filter((v: any) => v.option_id).map((v: any) => v.user_id));
-    const noAnswerCount = Math.max(0, expected.length - answeredUsers.size);
-
-    return {
-      questionId: question.id,
-      questionNumber: question.sort_order,
-      question: question.question,
-      totalVotes,
-      noAnswerCount,
-      ranking: (options ?? []).map((option: any) => ({
-        optionId: option.id,
-        label: option.label,
-        votes: counts[option.id] ?? 0,
-      })).sort((a: any, b: any) => b.votes - a.votes),
-    };
-  }));
-
-  return {
-    game: { id: game.id, title: game.title, pin: game.pin, status: game.status },
-    participantCount: participantCount ?? 0,
-    totalVotes: questions.reduce((sum: number, q: any) => sum + q.totalVotes, 0),
-    questions,
   };
 }
 

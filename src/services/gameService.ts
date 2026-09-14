@@ -464,6 +464,17 @@ export async function closeGame(gameId: string, requesterId: string) {
   return getGame(gameId, requesterId);
 }
 
+export async function deleteGame(gameId: string, requesterId: string) {
+  const game = await getGame(gameId, requesterId);
+  const { error } = await supabaseAdmin
+    .from("games")
+    .delete()
+    .eq("id", game.id)
+    .eq("created_by", requesterId);
+  if (error) throw error;
+  return { ok: true };
+}
+
 export async function getGamePublicResults(gameId: string) {
   const game = await getGame(gameId);
   const participantCount = await getParticipantCount(gameId);

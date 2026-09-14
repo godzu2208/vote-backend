@@ -17,6 +17,7 @@ import {
   getGameDashboard,
   getQuestionVoters,
   getGamePublicResults,
+  deleteGame,
 } from "../services/gameService";
 
 const router = Router();
@@ -47,12 +48,10 @@ router.post("/games", authMiddleware, requireAdmin, async (req, res) => {
       code === "game_pin_taken" ||
       err?.details?.includes?.("games_pin_uidx")
     ) {
-      return res
-        .status(409)
-        .json({
-          error: "game_pin_taken",
-          message: "Game PIN đã được sử dụng.",
-        });
+      return res.status(409).json({
+        error: "game_pin_taken",
+        message: "Game PIN đã được sử dụng.",
+      });
     }
     console.error("[POST /games]", err);
     return res.status(500).json({ error: "internal_error" });
@@ -110,15 +109,13 @@ router.put("/games/:id", authMiddleware, requireAdmin, async (req, res) => {
       code === "game_not_editable" ||
       code === "game_lobby_has_participants"
     ) {
-      return res
-        .status(409)
-        .json({
-          error: code,
-          message:
-            code === "game_lobby_has_participants"
-              ? "Game đang có người tham gia nên không thể chỉnh sửa câu hỏi."
-              : "Game này đã bắt đầu hoặc kết thúc nên không thể chỉnh sửa.",
-        });
+      return res.status(409).json({
+        error: code,
+        message:
+          code === "game_lobby_has_participants"
+            ? "Game đang có người tham gia nên không thể chỉnh sửa câu hỏi."
+            : "Game này đã bắt đầu hoặc kết thúc nên không thể chỉnh sửa.",
+      });
     }
     console.error("[PUT /games/:id]", err);
     return res.status(500).json({ error: "internal_error" });
@@ -149,6 +146,21 @@ router.get("/games/:id/results", authMiddleware, async (req, res) => {
     return res
       .status(404)
       .json({ error: "not_found", message: "Không tìm thấy Game." });
+  }
+});
+
+router.delete("/games/:id", authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const result = await deleteGame(req.params.id, req.user!.id);
+    return res.json(result);
+  } catch (err: any) {
+    if (err?.code === "not_found" || err?.message === "No rows found") {
+      return res
+        .status(404)
+        .json({ error: "not_found", message: "Không tìm thấy Game." });
+    }
+    console.error("[DELETE /games/:id]", err);
+    return res.status(500).json({ error: "internal_error" });
   }
 });
 
@@ -216,12 +228,10 @@ router.post(
       });
     } catch (err: any) {
       if (["game_has_no_questions", "game_not_ready"].includes(err?.code))
-        return res
-          .status(409)
-          .json({
-            error: err.code,
-            message: "Game chưa sẵn sàng để mở lobby.",
-          });
+        return res.status(409).json({
+          error: err.code,
+          message: "Game chưa sẵn sàng để mở lobby.",
+        });
       console.error("[POST /games/:id/lobby]", err);
       return res.status(500).json({ error: "internal_error" });
     }
@@ -239,12 +249,10 @@ router.post(
         game: await startGame(req.params.id, req.user!.id),
       });
     } catch (err: any) {
-      return res
-        .status(409)
-        .json({
-          error: err?.code ?? "game_not_ready",
-          message: "Game chưa sẵn sàng để bắt đầu.",
-        });
+      return res.status(409).json({
+        error: err?.code ?? "game_not_ready",
+        message: "Game chưa sẵn sàng để bắt đầu.",
+      });
     }
   },
 );
@@ -261,12 +269,10 @@ router.post(
       });
     } catch (err: any) {
       console.error("[POST /games/:id/next]", err);
-      return res
-        .status(409)
-        .json({
-          error: err?.code ?? "game_not_active",
-          message: "Không thể chuyển câu hỏi.",
-        });
+      return res.status(409).json({
+        error: err?.code ?? "game_not_active",
+        message: "Không thể chuyển câu hỏi.",
+      });
     }
   },
 );

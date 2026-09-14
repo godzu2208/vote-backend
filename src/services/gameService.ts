@@ -466,12 +466,48 @@ export async function closeGame(gameId: string, requesterId: string) {
 
 export async function deleteGame(gameId: string, requesterId: string) {
   const game = await getGame(gameId, requesterId);
+
+  const { data: sessions, error: sessionsError } = await supabaseAdmin
+    .from("sessions")
+    .select("id")
+    .eq("game_id", gameId);
+  if (sessionsError) throw sessionsError;
+
+  const sessionIds = (sessions ?? []).map((session: any) => session.id);
+
+  if (sessionIds.length > 0) {
+    const deletes = [
+      supabaseAdmin.from("vote_logs").delete().in("session_id", sessionIds),
+      supabaseAdmin.from("votes").delete().in("session_id", sessionIds),
+      supabaseAdmin.from("selections").delete().in("session_id", sessionIds),
+      supabaseAdmin.from("options").delete().in("session_id", sessionIds),
+    ];
+
+    const results = await Promise.all(deletes);
+    for (const result of results) {
+      if (result.error) throw result.error;
+    }
+
+    const { error: deleteSessionsError } = await supabaseAdmin
+      .from("sessions")
+      .delete()
+      .eq("game_id", gameId);
+    if (deleteSessionsError) throw deleteSessionsError;
+  }
+
+  const { error: deleteParticipantsError } = await supabaseAdmin
+    .from("game_participants")
+    .delete()
+    .eq("game_id", gameId);
+  if (deleteParticipantsError) throw deleteParticipantsError;
+
   const { error } = await supabaseAdmin
     .from("games")
     .delete()
     .eq("id", game.id)
     .eq("created_by", requesterId);
   if (error) throw error;
+
   return { ok: true };
 }
 

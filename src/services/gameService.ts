@@ -298,9 +298,27 @@ export async function getGameParticipants(gameId: string) {
     .eq("game_id", gameId)
     .order("joined_at", { ascending: true });
   if (error) throw error;
+
+  const userIds = Array.from(
+    new Set((data ?? []).map((p: any) => p.user_id).filter(Boolean)),
+  );
+  let profileMap = new Map<string, any>();
+  if (userIds.length) {
+    const { data: profiles, error: profilesError } = await supabaseAdmin
+      .from("profiles")
+      .select("id,email")
+      .in("id", userIds);
+    if (profilesError) throw profilesError;
+    profileMap = new Map(
+      (profiles ?? []).map((profile: any) => [profile.id, profile]),
+    );
+  }
+
   return (data ?? []).map((p: any) => ({
     id: p.id,
+    userId: p.user_id,
     displayName: p.display_name,
+    email: profileMap.get(p.user_id)?.email ?? null,
     joinedAt: p.joined_at,
     lastSeenAt: p.last_seen_at,
   }));

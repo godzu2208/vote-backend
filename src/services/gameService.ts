@@ -608,10 +608,28 @@ export async function getGameDashboard(gameId: string, requesterId: string) {
     .order("joined_at", { ascending: true });
   if (participantResult.error) throw participantResult.error;
 
+  const participantUserIds = Array.from(
+    new Set(
+      (participantResult.data ?? []).map((p: any) => p.user_id).filter(Boolean),
+    ),
+  );
+  const profileResult = participantUserIds.length
+    ? await supabaseAdmin
+        .from("profiles")
+        .select("id,email,full_name")
+        .in("id", participantUserIds)
+    : { data: [] as any[], error: null };
+  if (profileResult.error) throw profileResult.error;
+
+  const profileMap = new Map(
+    (profileResult.data ?? []).map((profile: any) => [profile.id, profile]),
+  );
+
   const participants = (participantResult.data ?? []).map((p: any) => ({
     id: p.id,
     userId: p.user_id,
     displayName: p.display_name,
+    email: profileMap.get(p.user_id)?.email ?? null,
     joinedAt: p.joined_at,
     lastSeenAt: p.last_seen_at,
   }));
@@ -666,13 +684,16 @@ export async function getGameDashboard(gameId: string, requesterId: string) {
           noAnswerCount += 1;
         }
 
+        const profile = profileMap.get(participant.userId);
         history.push({
           questionId: question.id,
           questionNumber: question.sort_order,
           question: question.question,
           userId: participant.userId,
           displayName: participant.displayName,
+          email: profile?.email ?? null,
           optionId: vote?.option_id ?? null,
+          label: option?.label ?? null,
           optionLabel: option?.label ?? "Không chọn",
           timestamp:
             vote?.finalized_at ?? question.ended_at ?? participant.joinedAt,
@@ -688,13 +709,16 @@ export async function getGameDashboard(gameId: string, requesterId: string) {
         if (vote.option_id)
           counts[vote.option_id] = (counts[vote.option_id] ?? 0) + 1;
         else noAnswerCount += 1;
+        const legacyProfile = profileMap.get(vote.user_id);
         history.push({
           questionId: question.id,
           questionNumber: question.sort_order,
           question: question.question,
           userId: vote.user_id,
-          displayName: "Người chơi",
+          displayName: legacyProfile?.full_name ?? "Người chơi",
+          email: legacyProfile?.email ?? null,
           optionId: vote.option_id,
+          label: option?.label ?? null,
           optionLabel: option?.label ?? "Không chọn",
           timestamp:
             vote.finalized_at ?? question.ended_at ?? new Date().toISOString(),

@@ -302,23 +302,13 @@ export async function getGameParticipants(gameId: string) {
   const userIds = Array.from(
     new Set((data ?? []).map((p: any) => p.user_id).filter(Boolean)),
   );
-  let profileMap = new Map<string, any>();
-  if (userIds.length) {
-    const { data: profiles, error: profilesError } = await supabaseAdmin
-      .from("profiles")
-      .select("id,email")
-      .in("id", userIds);
-    if (profilesError) throw profilesError;
-    profileMap = new Map(
-      (profiles ?? []).map((profile: any) => [profile.id, profile]),
-    );
-  }
+  const userEmailMap = await getUserEmailMap(userIds);
 
   return (data ?? []).map((p: any) => ({
     id: p.id,
     userId: p.user_id,
     displayName: p.display_name,
-    email: profileMap.get(p.user_id)?.email ?? null,
+    email: userEmailMap.get(p.user_id)?.email ?? null,
     joinedAt: p.joined_at,
     lastSeenAt: p.last_seen_at,
   }));
@@ -616,6 +606,38 @@ export async function getGameLiveStats(gameId: string, requesterId: string) {
   };
 }
 
+async function getUserEmailMap(userIds: string[]) {
+  const uniqueIds = Array.from(new Set((userIds ?? []).filter(Boolean)));
+  if (!uniqueIds.length) return new Map<string, { email?: string | null; full_name?: string | null }>();
+
+  const emailMap = new Map<string, { email?: string | null; full_name?: string | null }>();
+
+  try {
+    const { data: userList, error } = await supabaseAdmin.auth.admin.listUsers({
+      page: 1,
+      perPage: 1000,
+    });
+    if (error) throw error;
+
+    const users = userList?.users ?? [];
+    for (const user of users) {
+      if (!user?.id) continue;
+      emailMap.set(user.id, {
+        email: user.email ?? null,
+        full_name: user.user_metadata?.full_name ?? user.user_metadata?.name ?? null,
+      });
+    }
+  } catch {
+    // If auth.users is unavailable in the runtime environment, keep null email values.
+  }
+
+  const filtered = new Map<string, { email?: string | null; full_name?: string | null }>();
+  for (const id of uniqueIds) {
+    filtered.set(id, emailMap.get(id) ?? { email: null, full_name: null });
+  }
+  return filtered;
+}
+
 export async function getGameDashboard(gameId: string, requesterId: string) {
   const game = await getGame(gameId, requesterId);
 
@@ -631,23 +653,13 @@ export async function getGameDashboard(gameId: string, requesterId: string) {
       (participantResult.data ?? []).map((p: any) => p.user_id).filter(Boolean),
     ),
   );
-  const profileResult = participantUserIds.length
-    ? await supabaseAdmin
-        .from("profiles")
-        .select("id,email,full_name")
-        .in("id", participantUserIds)
-    : { data: [] as any[], error: null };
-  if (profileResult.error) throw profileResult.error;
-
-  const profileMap = new Map(
-    (profileResult.data ?? []).map((profile: any) => [profile.id, profile]),
-  );
+  const userEmailMap = await getUserEmailMap(participantUserIds);
 
   const participants = (participantResult.data ?? []).map((p: any) => ({
     id: p.id,
     userId: p.user_id,
     displayName: p.display_name,
-    email: profileMap.get(p.user_id)?.email ?? null,
+    email: userEmailMap.get(p.user_id)?.email ?? null,
     joinedAt: p.joined_at,
     lastSeenAt: p.last_seen_at,
   }));
@@ -702,7 +714,7 @@ export async function getGameDashboard(gameId: string, requesterId: string) {
           noAnswerCount += 1;
         }
 
-        const profile = profileMap.get(participant.userId);
+        const profile = userEmailMap.get(participant.userId);
         history.push({
           questionId: question.id,
           questionNumber: question.sort_order,
@@ -727,7 +739,7 @@ export async function getGameDashboard(gameId: string, requesterId: string) {
         if (vote.option_id)
           counts[vote.option_id] = (counts[vote.option_id] ?? 0) + 1;
         else noAnswerCount += 1;
-        const legacyProfile = profileMap.get(vote.user_id);
+        const legacyProfile = userEmailMap.get(vote.user_id);
         history.push({
           questionId: question.id,
           questionNumber: question.sort_order,

@@ -520,10 +520,14 @@ export async function getGamePublicResults(gameId: string) {
       const noAnswerCount = Math.max(0, participantCount - votedUsers.size);
 
       const ranking = (options ?? [])
-        .map((option: any) => ({
+        .map((option: any, optionIndex: number) => ({
           optionId: option.id,
           label: option.label,
           votes: countMap.get(option.id) ?? 0,
+          // Vị trí gốc của đáp án (theo sort_order gốc trong DB), dùng để
+          // hiển thị đúng chữ cái A/B/C/D — không được suy từ vị trí sau
+          // khi mảng đã bị sắp xếp lại theo số vote.
+          optionIndex,
         }))
         .sort((a: any, b: any) => b.votes - a.votes);
 
@@ -608,9 +612,16 @@ export async function getGameLiveStats(gameId: string, requesterId: string) {
 
 async function getUserEmailMap(userIds: string[]) {
   const uniqueIds = Array.from(new Set((userIds ?? []).filter(Boolean)));
-  if (!uniqueIds.length) return new Map<string, { email?: string | null; full_name?: string | null }>();
+  if (!uniqueIds.length)
+    return new Map<
+      string,
+      { email?: string | null; full_name?: string | null }
+    >();
 
-  const emailMap = new Map<string, { email?: string | null; full_name?: string | null }>();
+  const emailMap = new Map<
+    string,
+    { email?: string | null; full_name?: string | null }
+  >();
 
   try {
     const { data: userList, error } = await supabaseAdmin.auth.admin.listUsers({
@@ -624,14 +635,18 @@ async function getUserEmailMap(userIds: string[]) {
       if (!user?.id) continue;
       emailMap.set(user.id, {
         email: user.email ?? null,
-        full_name: user.user_metadata?.full_name ?? user.user_metadata?.name ?? null,
+        full_name:
+          user.user_metadata?.full_name ?? user.user_metadata?.name ?? null,
       });
     }
   } catch {
     // If auth.users is unavailable in the runtime environment, keep null email values.
   }
 
-  const filtered = new Map<string, { email?: string | null; full_name?: string | null }>();
+  const filtered = new Map<
+    string,
+    { email?: string | null; full_name?: string | null }
+  >();
   for (const id of uniqueIds) {
     filtered.set(id, emailMap.get(id) ?? { email: null, full_name: null });
   }
@@ -756,10 +771,11 @@ export async function getGameDashboard(gameId: string, requesterId: string) {
       }
 
       const ranking = (options ?? [])
-        .map((option: any) => ({
+        .map((option: any, optionIndex: number) => ({
           optionId: option.id,
           label: option.label,
           votes: counts[option.id] ?? 0,
+          optionIndex,
         }))
         .sort((a: any, b: any) => b.votes - a.votes);
 
